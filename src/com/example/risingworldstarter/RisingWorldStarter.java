@@ -5,6 +5,7 @@ import net.risingworld.api.Server;
 import net.risingworld.api.Timer;
 import net.risingworld.api.events.EventMethod;
 import net.risingworld.api.events.Listener;
+import net.risingworld.api.events.general.SkipNightEvent;
 import net.risingworld.api.events.player.PlayerCommandEvent;
 import net.risingworld.api.events.player.PlayerChangePositionEvent;
 import net.risingworld.api.events.player.PlayerDisconnectEvent;
@@ -50,7 +51,8 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         claims = new ClaimService(Path.of(getPath(), "claims.properties"));
         claimAdmins = new ClaimAdminService(Path.of(getPath(), "claim-admins.properties"));
         economySettings = EconomySettings.load(Path.of(getPath(), "economy.properties"));
-        lastSalaryDate = null;
+        net.risingworld.api.objects.Time currentTime = Server.getGameTime();
+        lastSalaryDate = new WorldDate(currentTime.getYear(), currentTime.getMonth(), currentTime.getDay());
         registerEventListener(this);
         worldClockTimer = new Timer(1f, 0f, -1, this::updateWorldClockLabels);
         worldClockTimer.start();
@@ -63,6 +65,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
             worldClockTimer.kill();
             worldClockTimer = null;
         }
+        lastSalaryDate = null;
         balanceLabels.clear();
         worldTimeLabels.clear();
         claimVisuals.clear();
@@ -93,6 +96,15 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         claimVisuals.remove(event.getPlayer().getUID());
         visualModes.remove(event.getPlayer().getUID());
         visualHeights.remove(event.getPlayer().getUID());
+    }
+
+    @EventMethod
+    public void onSkipNight(SkipNightEvent event) {
+        if (!event.isCancelled()) {
+            // The event fires before the clock jumps. Check shortly afterwards so
+            // sleeping players have woken and the new world date is available.
+            executeDelayed(1f, this::updateWorldClockLabels);
+        }
     }
 
     @EventMethod
@@ -411,7 +423,6 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         for (UILabel label : worldTimeLabels.values()) {
             updateWorldClockLabel(label, time);
         }
-        lastSalaryDate = null;
     }
 
     private void payDailySalaryWhenDateChanges(net.risingworld.api.objects.Time time) {
@@ -426,11 +437,16 @@ public final class RisingWorldStarter extends Plugin implements Listener {
 
         lastSalaryDate = currentDate;
         long salary = economySettings.baseSalary();
-        for (Player player : Server.getAllPlayers()) {
+        Player[] players = Server.getAllPlayers();
+        System.out.println("[RisingWorldStarter] Running daily payroll for " + players.length
+                + " connected player(s) on " + currentDate);
+        for (Player player : players) {
             economy.createAccount(player.getUID(), economySettings.defaultBalance());
-            economy.deposit(player.getUID(), salary);
+            long newBalance = economy.deposit(player.getUID(), salary);
             updateBalanceLabel(player);
             player.sendTextMessage("<color=#77FF99>Daily salary paid:</color> " + formatBalance(salary));
+            System.out.println("[RisingWorldStarter] Paid " + player.getName() + " " + formatBalance(salary)
+                    + "; new balance " + formatBalance(newBalance));
         }
     }
 

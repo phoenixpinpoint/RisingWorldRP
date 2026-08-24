@@ -72,7 +72,8 @@ base-salary=1000.00
 
 Every connected player receives the base salary when the in-world date changes
 at midnight. Payday detects the date change rather than requiring an exact
-midnight tick, so players are still paid when sleeping skips past midnight.
+midnight tick. It also listens for Rising World's night-skip event and checks
+again after sleepers wake, so sleeping through midnight cannot miss payday.
 Other plugins can access the API through the loaded plugin instance:
 
 ```java
