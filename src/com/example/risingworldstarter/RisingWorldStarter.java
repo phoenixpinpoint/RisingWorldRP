@@ -473,15 +473,42 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         searchField.setMaxCharacters(80);
         window.addChild(searchField);
 
+        UILabel cartSummary = new UILabel("Cart: 0 items     $0.00");
+        cartSummary.setPosition(20f, 162f, false);
+        cartSummary.setSize(420f, 38f, false);
+        cartSummary.setFontSize(18f);
+        cartSummary.setFontColor((int) 0xF4E3A1FFL);
+        cartSummary.setTextAlign(TextAnchor.MiddleLeft);
+        window.addChild(cartSummary);
+
+        UILabel clearCartButton = new UILabel("CLEAR");
+        clearCartButton.setPosition(450f, 162f, false);
+        clearCartButton.setSize(100f, 38f, false);
+        clearCartButton.setFontSize(16f);
+        clearCartButton.setTextAlign(TextAnchor.MiddleCenter);
+        clearCartButton.setBackgroundColor((int) 0x8B2D2DFFL);
+        clearCartButton.setClickable(true);
+        window.addChild(clearCartButton);
+
+        UILabel checkoutButton = new UILabel("CHECKOUT");
+        checkoutButton.setPosition(560f, 162f, false);
+        checkoutButton.setSize(180f, 38f, false);
+        checkoutButton.setFontSize(16f);
+        checkoutButton.setTextAlign(TextAnchor.MiddleCenter);
+        checkoutButton.setBackgroundColor((int) 0x2D7D46FFL);
+        checkoutButton.setClickable(true);
+        window.addChild(checkoutButton);
+
         UIScrollView itemList = new UIScrollView(UIScrollView.ScrollViewMode.Vertical);
-        itemList.setPosition(20f, 164f, false);
-        itemList.setSize(720f, 436f, false);
+        itemList.setPosition(20f, 210f, false);
+        itemList.setSize(720f, 390f, false);
         itemList.setVerticalScrollerVisibility(UIScrollView.ScrollerVisibility.Auto);
         itemList.setHorizontalScrollerVisibility(UIScrollView.ScrollerVisibility.Hidden);
         itemList.setMouseWheelScrollSize(92f);
         window.addChild(itemList);
 
-        StoreView view = new StoreView(window, closeButton, searchField, itemList);
+        StoreView view = new StoreView(window, closeButton, searchField, itemList,
+                cartSummary, clearCartButton, checkoutButton);
         List<String> categories = new ArrayList<>();
         categories.add("All");
         storeCatalog.items().stream().map(StoreCatalog.StoreItem::category).distinct().forEach(categories::add);
@@ -511,6 +538,10 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private void rebuildStoreItems(StoreView view) {
         view.itemList().removeAllChilds();
         view.itemsByButtonId().clear();
+        view.incrementByButtonId().clear();
+        view.decrementByButtonId().clear();
+        view.quantityLabels().clear();
+        view.cartStatusLabels().clear();
         int itemIndex = 0;
         float yOffset = 0f;
         for (StoreCatalog.StoreItem storeItem : storeCatalog.items()) {
@@ -548,25 +579,43 @@ public final class RisingWorldStarter extends Plugin implements Listener {
 
             UILabel itemDetails = new UILabel(storeItem.name() + "\n" + formatBalance(storeItem.price()));
             itemDetails.setPosition(98f, 7f, false);
-            itemDetails.setSize(430f, 72f, false);
+            itemDetails.setSize(280f, 72f, false);
             itemDetails.setFontSize(18f);
             itemDetails.setFontColor((int) 0xFFFFFFFFL);
             itemDetails.setTextAlign(TextAnchor.MiddleLeft);
             itemRow.addChild(itemDetails);
 
-            UILabel buyButton = new UILabel("BUY");
-            buyButton.setPosition(570f, 20f, false);
-            buyButton.setSize(100f, 46f, false);
-            buyButton.setFontSize(18f);
-            buyButton.setFontColor((int) 0xFFFFFFFFL);
-            buyButton.setTextAlign(TextAnchor.MiddleCenter);
-            buyButton.setBackgroundColor((int) 0x2D7D46FFL);
-            buyButton.setBorder(1f);
-            buyButton.setBorderColor((int) 0x77FF99FFL);
-            buyButton.setBorderEdgeRadius(5f, false);
-            buyButton.setClickable(true);
-            itemRow.addChild(buyButton);
-            view.itemsByButtonId().put(buyButton.getID(), storeItem);
+            UILabel minusButton = createCartQuantityButton("-");
+            minusButton.setPosition(402f, 20f, false);
+            itemRow.addChild(minusButton);
+            view.decrementByButtonId().put(minusButton.getID(), storeItem);
+
+            int quantity = view.cart().containsKey(storeItem.id())
+                    ? view.cart().get(storeItem.id()).quantity() : 0;
+            UILabel quantityLabel = new UILabel(Integer.toString(quantity));
+            quantityLabel.setPosition(452f, 20f, false);
+            quantityLabel.setSize(56f, 46f, false);
+            quantityLabel.setFontSize(18f);
+            quantityLabel.setFontColor((int) 0xFFFFFFFFL);
+            quantityLabel.setTextAlign(TextAnchor.MiddleCenter);
+            quantityLabel.setBackgroundColor((int) 0x11161DFFL);
+            itemRow.addChild(quantityLabel);
+            view.quantityLabels().put(storeItem.id(), quantityLabel);
+
+            UILabel plusButton = createCartQuantityButton("+");
+            plusButton.setPosition(518f, 20f, false);
+            itemRow.addChild(plusButton);
+            view.incrementByButtonId().put(plusButton.getID(), storeItem);
+
+            UILabel inCartLabel = new UILabel("IN CART");
+            inCartLabel.setPosition(578f, 20f, false);
+            inCartLabel.setSize(92f, 46f, false);
+            inCartLabel.setFontSize(14f);
+            inCartLabel.setFontColor((int) 0x77FF99FFL);
+            inCartLabel.setTextAlign(TextAnchor.MiddleCenter);
+            inCartLabel.setVisible(quantity > 0);
+            itemRow.addChild(inCartLabel);
+            view.cartStatusLabels().put(storeItem.id(), inCartLabel);
             itemIndex++;
             yOffset += 92f;
         }
@@ -587,6 +636,18 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                 category.equals(view.selectedCategory()) ? (int) 0x9A7B24FFL : (int) 0x28313DFFL));
     }
 
+    private static UILabel createCartQuantityButton(String text) {
+        UILabel button = new UILabel(text);
+        button.setSize(40f, 46f, false);
+        button.setFontSize(22f);
+        button.setFontColor((int) 0xFFFFFFFFL);
+        button.setTextAlign(TextAnchor.MiddleCenter);
+        button.setBackgroundColor((int) 0x3A4655FFL);
+        button.setBorderEdgeRadius(4f, false);
+        button.setClickable(true);
+        return button;
+    }
+
     private void closeStore(Player player) {
         StoreView view = storeViews.remove(player.getUID());
         if (view != null) {
@@ -595,24 +656,83 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         player.setMouseCursorVisible(false);
     }
 
-    private void purchaseStoreItem(Player player, StoreCatalog.StoreItem storeItem) {
-        if (!economy.withdraw(player.getUID(), storeItem.price())) {
-            player.sendTextMessage("<color=#FF7777>You cannot afford " + storeItem.name()
-                    + " for " + formatBalance(storeItem.price()) + ".</color>");
+    private void changeCartQuantity(StoreView view, StoreCatalog.StoreItem item, int delta) {
+        int oldQuantity = view.cart().containsKey(item.id()) ? view.cart().get(item.id()).quantity() : 0;
+        int newQuantity = Math.max(0, Math.min(99, oldQuantity + delta));
+        if (newQuantity == 0) {
+            view.cart().remove(item.id());
+        } else {
+            view.cart().put(item.id(), new CartLine(item, newQuantity));
+        }
+        UILabel quantityLabel = view.quantityLabels().get(item.id());
+        if (quantityLabel != null) {
+            quantityLabel.setText(Integer.toString(newQuantity));
+        }
+        UILabel statusLabel = view.cartStatusLabels().get(item.id());
+        if (statusLabel != null) {
+            statusLabel.setVisible(newQuantity > 0);
+        }
+        updateCartSummary(view);
+    }
+
+    private static void updateCartSummary(StoreView view) {
+        int itemCount = 0;
+        long total = 0L;
+        for (CartLine line : view.cart().values()) {
+            itemCount += line.quantity();
+            total = Math.addExact(total, Math.multiplyExact(line.item().price(), line.quantity()));
+        }
+        view.cartSummary().setText("Cart: " + itemCount + " item(s)     " + formatBalance(total));
+    }
+
+    private void clearCart(StoreView view) {
+        view.cart().clear();
+        view.quantityLabels().values().forEach(label -> label.setText("0"));
+        view.cartStatusLabels().values().forEach(label -> label.setVisible(false));
+        updateCartSummary(view);
+    }
+
+    private void checkoutCart(Player player, StoreView view) {
+        if (view.cart().isEmpty()) {
+            player.sendTextMessage("<color=#AAAAAA>Your shopping cart is empty.</color>");
             return;
         }
 
-        Item addedItem = player.getInventory().addItem(storeItem.id(), 0, 1);
-        if (addedItem == null) {
-            economy.deposit(player.getUID(), storeItem.price());
-            updateBalanceLabel(player);
-            player.sendTextMessage("<color=#FF7777>Your inventory is full. The purchase was refunded.</color>");
+        long total = 0L;
+        for (CartLine line : view.cart().values()) {
+            total = Math.addExact(total, Math.multiplyExact(line.item().price(), line.quantity()));
+        }
+        if (!economy.withdraw(player.getUID(), total)) {
+            player.sendTextMessage("<color=#FF7777>You cannot afford this cart total of "
+                    + formatBalance(total) + ".</color>");
             return;
         }
 
+        long refund = 0L;
+        int purchasedCount = 0;
+        List<Short> completedItems = new ArrayList<>();
+        for (CartLine line : view.cart().values()) {
+            Item addedItem = player.getInventory().addItem(line.item().id(), 0, line.quantity());
+            if (addedItem == null) {
+                refund = Math.addExact(refund, Math.multiplyExact(line.item().price(), line.quantity()));
+            } else {
+                purchasedCount += line.quantity();
+                completedItems.add(line.item().id());
+            }
+        }
+        completedItems.forEach(view.cart()::remove);
+        if (refund > 0) {
+            economy.deposit(player.getUID(), refund);
+            player.sendTextMessage("<color=#FFAA66>Some items did not fit. Refunded "
+                    + formatBalance(refund) + "; those items remain in your cart.</color>");
+        }
         updateBalanceLabel(player);
-        player.sendTextMessage("<color=#77FF99>Purchased " + storeItem.name() + " for "
-                + formatBalance(storeItem.price()) + ".</color>");
+        if (purchasedCount > 0) {
+            player.sendTextMessage("<color=#77FF99>Checkout complete:</color> " + purchasedCount
+                    + " item(s) purchased for " + formatBalance(total - refund) + ".");
+        }
+        rebuildStoreItems(view);
+        updateCartSummary(view);
     }
 
     /** Refreshes the HUD after another plugin changes a connected player's balance. */
@@ -739,6 +859,14 @@ public final class RisingWorldStarter extends Plugin implements Listener {
             closeStore(player);
             return;
         }
+        if (elementId == view.clearCartButton().getID()) {
+            clearCart(view);
+            return;
+        }
+        if (elementId == view.checkoutButton().getID()) {
+            checkoutCart(player, view);
+            return;
+        }
         String category = view.categoriesByButtonId().get(elementId);
         if (category != null) {
             view.setSelectedCategory(category);
@@ -746,9 +874,14 @@ public final class RisingWorldStarter extends Plugin implements Listener {
             rebuildStoreItems(view);
             return;
         }
-        StoreCatalog.StoreItem storeItem = view.itemsByButtonId().get(elementId);
-        if (storeItem != null) {
-            purchaseStoreItem(player, storeItem);
+        StoreCatalog.StoreItem incrementItem = view.incrementByButtonId().get(elementId);
+        if (incrementItem != null) {
+            changeCartQuantity(view, incrementItem, 1);
+            return;
+        }
+        StoreCatalog.StoreItem decrementItem = view.decrementByButtonId().get(elementId);
+        if (decrementItem != null) {
+            changeCartQuantity(view, decrementItem, -1);
         }
     }
 
@@ -768,30 +901,53 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         private final UILabel closeButton;
         private final UITextField searchField;
         private final UIScrollView itemList;
+        private final UILabel cartSummary;
+        private final UILabel clearCartButton;
+        private final UILabel checkoutButton;
         private final Map<Integer, StoreCatalog.StoreItem> itemsByButtonId = new ConcurrentHashMap<>();
+        private final Map<Integer, StoreCatalog.StoreItem> incrementByButtonId = new ConcurrentHashMap<>();
+        private final Map<Integer, StoreCatalog.StoreItem> decrementByButtonId = new ConcurrentHashMap<>();
+        private final Map<Short, UILabel> quantityLabels = new ConcurrentHashMap<>();
+        private final Map<Short, UILabel> cartStatusLabels = new ConcurrentHashMap<>();
+        private final Map<Short, CartLine> cart = new ConcurrentHashMap<>();
         private final Map<Integer, String> categoriesByButtonId = new ConcurrentHashMap<>();
         private final Map<String, UILabel> categoryButtons = new ConcurrentHashMap<>();
         private String selectedCategory = "All";
         private String searchText = "";
 
         private StoreView(UIElement window, UILabel closeButton, UITextField searchField,
-                          UIScrollView itemList) {
+                          UIScrollView itemList, UILabel cartSummary, UILabel clearCartButton,
+                          UILabel checkoutButton) {
             this.window = window;
             this.closeButton = closeButton;
             this.searchField = searchField;
             this.itemList = itemList;
+            this.cartSummary = cartSummary;
+            this.clearCartButton = clearCartButton;
+            this.checkoutButton = checkoutButton;
         }
 
         private UIElement window() { return window; }
         private UILabel closeButton() { return closeButton; }
         private UITextField searchField() { return searchField; }
         private UIScrollView itemList() { return itemList; }
+        private UILabel cartSummary() { return cartSummary; }
+        private UILabel clearCartButton() { return clearCartButton; }
+        private UILabel checkoutButton() { return checkoutButton; }
         private Map<Integer, StoreCatalog.StoreItem> itemsByButtonId() { return itemsByButtonId; }
+        private Map<Integer, StoreCatalog.StoreItem> incrementByButtonId() { return incrementByButtonId; }
+        private Map<Integer, StoreCatalog.StoreItem> decrementByButtonId() { return decrementByButtonId; }
+        private Map<Short, UILabel> quantityLabels() { return quantityLabels; }
+        private Map<Short, UILabel> cartStatusLabels() { return cartStatusLabels; }
+        private Map<Short, CartLine> cart() { return cart; }
         private Map<Integer, String> categoriesByButtonId() { return categoriesByButtonId; }
         private Map<String, UILabel> categoryButtons() { return categoryButtons; }
         private String selectedCategory() { return selectedCategory; }
         private void setSelectedCategory(String selectedCategory) { this.selectedCategory = selectedCategory; }
         private String searchText() { return searchText; }
         private void setSearchText(String searchText) { this.searchText = searchText; }
+    }
+
+    private record CartLine(StoreCatalog.StoreItem item, int quantity) {
     }
 }

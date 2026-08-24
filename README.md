@@ -114,6 +114,11 @@ Clickable category tabs, including an `All` tab, filter the product list. The
 search field performs a case-insensitive item-name search within the selected
 category as the player types.
 
+Each product has minus and plus controls for quantities from 0 to 99. The live
+cart bar shows the total quantity and cost and provides Clear and Checkout
+buttons. Checkout charges the cart once; products that cannot fit in the
+inventory are refunded and remain in the cart for the player to retry.
+
 On first startup the plugin generates
 `Plugins/RisingWorldStarter/marketplace.properties`. Each item has entries like:
 

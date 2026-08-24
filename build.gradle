@@ -42,7 +42,9 @@ sourceSets {
 }
 
 dependencies {
-    compileOnly files(sdkJar)
+    // Resolve the local file eagerly so IDE tooling models include PluginAPI.jar
+    // on the compile classpath instead of seeing only a deferred Provider.
+    compileOnly files(sdkJar.get())
 }
 
 java {
