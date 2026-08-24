@@ -10,10 +10,20 @@ import net.risingworld.api.events.player.PlayerCommandEvent;
 import net.risingworld.api.events.player.PlayerChangePositionEvent;
 import net.risingworld.api.events.player.PlayerDisconnectEvent;
 import net.risingworld.api.events.player.PlayerSpawnEvent;
+import net.risingworld.api.events.player.ui.PlayerUIElementClickEvent;
+import net.risingworld.api.events.player.ui.PlayerUITextFieldChangeEvent;
+import net.risingworld.api.assets.TextureAsset;
+import net.risingworld.api.definitions.Definitions;
+import net.risingworld.api.definitions.Items;
 import net.risingworld.api.objects.Player;
 import net.risingworld.api.objects.Area;
+import net.risingworld.api.objects.Item;
+import net.risingworld.api.ui.UIElement;
 import net.risingworld.api.ui.UILabel;
+import net.risingworld.api.ui.UIScrollView;
+import net.risingworld.api.ui.UITextField;
 import net.risingworld.api.ui.style.Pivot;
+import net.risingworld.api.ui.style.ScaleMode;
 import net.risingworld.api.ui.style.TextAnchor;
 import net.risingworld.api.utils.Utils;
 import net.risingworld.api.utils.Vector3f;
@@ -38,24 +48,51 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private final Map<String, List<Area3D>> claimVisuals = new ConcurrentHashMap<>();
     private final Map<String, String> visualModes = new ConcurrentHashMap<>();
     private final Map<String, Float> visualHeights = new ConcurrentHashMap<>();
+    private final Map<String, StoreView> storeViews = new ConcurrentHashMap<>();
     private EconomyApi economy;
     private ClaimService claims;
     private ClaimAdminService claimAdmins;
     private EconomySettings economySettings;
+    private StoreCatalog storeCatalog;
     private Timer worldClockTimer;
     private PayPeriod lastSalaryPeriod;
 
     @Override
     public void onEnable() {
-        economy = new FileEconomyService(Path.of(getPath(), "balances.properties"));
-        claims = new ClaimService(Path.of(getPath(), "claims.properties"));
-        claimAdmins = new ClaimAdminService(Path.of(getPath(), "claim-admins.properties"));
-        economySettings = EconomySettings.load(Path.of(getPath(), "economy.properties"));
+        Path pluginPath = Path.of(getPath()).toAbsolutePath().normalize();
+        debug("Starting plugin initialization");
+        debug("Plugin data directory: " + pluginPath);
+
+        economy = new FileEconomyService(pluginPath.resolve("balances.properties"));
+        debug("Economy balances loaded");
+        claims = new ClaimService(pluginPath.resolve("claims.properties"));
+        debug("Land claims loaded");
+        claimAdmins = new ClaimAdminService(pluginPath.resolve("claim-admins.properties"));
+        debug("Claim administrators loaded: " + claimAdmins.getAll().size());
+
+        Path economyConfigPath = pluginPath.resolve("economy.properties");
+        economySettings = EconomySettings.load(economyConfigPath);
+        debug("Economy config loaded from " + economyConfigPath);
+        debug("Economy values: starting cash=" + formatBalance(economySettings.defaultBalance())
+                + ", claim cost=" + formatBalance(economySettings.claimCost())
+                + ", 8-hour salary=" + formatBalance(economySettings.baseSalary()));
+
+        Path marketplaceConfigPath = pluginPath.resolve("marketplace.properties");
+        storeCatalog = StoreCatalog.load(marketplaceConfigPath);
+        debug("Marketplace config loaded from " + marketplaceConfigPath);
+        debug("Marketplace enabled items: " + storeCatalog.items().size());
+
         net.risingworld.api.objects.Time currentTime = Server.getGameTime();
         lastSalaryPeriod = PayPeriod.from(currentTime);
+        debug(String.format(Locale.US, "World clock initialized: %d-%d-%d %02d:%02d",
+                currentTime.getYear(), currentTime.getMonth(), currentTime.getDay(),
+                currentTime.getHours(), currentTime.getMinutes()));
         registerEventListener(this);
+        debug("Event listener registered");
         worldClockTimer = new Timer(1f, 0f, -1, this::updateWorldClockLabels);
         worldClockTimer.start();
+        debug("World clock and payroll timer started; payroll runs at 00:00, 08:00, and 16:00");
+        debug("Commands registered: /balance, /bal, /store, /claim, /unclaim, /chunk, /claims, /claimadmin");
         System.out.println("[RisingWorldStarter] Enabled on Rising World " + getGameVersion());
     }
 
@@ -71,6 +108,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         claimVisuals.clear();
         visualModes.clear();
         visualHeights.clear();
+        storeViews.clear();
         System.out.println("[RisingWorldStarter] Disabled");
     }
 
@@ -96,6 +134,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         claimVisuals.remove(event.getPlayer().getUID());
         visualModes.remove(event.getPlayer().getUID());
         visualHeights.remove(event.getPlayer().getUID());
+        storeViews.remove(event.getPlayer().getUID());
     }
 
     @EventMethod
@@ -142,6 +181,9 @@ public final class RisingWorldStarter extends Plugin implements Listener {
             String formattedBalance = formatBalance(economy.getBalance(player.getUID()));
             player.sendTextMessage("<color=#E8C547>Cash:</color> " + formattedBalance);
             updateBalanceLabel(player);
+        } else if (command.equalsIgnoreCase("/store")) {
+            event.setCancelled(true);
+            toggleStore(event.getPlayer());
         } else if (command.equalsIgnoreCase("/claim")) {
             event.setCancelled(true);
             claimCurrentChunk(event.getPlayer());
@@ -368,6 +410,211 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         return player.isAdmin() || claimAdmins.contains(player.getUID());
     }
 
+    private void toggleStore(Player player) {
+        if (storeViews.containsKey(player.getUID())) {
+            closeStore(player);
+        } else {
+            openStore(player);
+        }
+    }
+
+    private void openStore(Player player) {
+        UIElement window = new UIElement();
+        window.setPosition(50f, 50f, true);
+        window.setPivot(Pivot.MiddleCenter);
+        window.setSize(760f, 620f, false);
+        window.setBackgroundColor((int) 0x161B22F2L);
+        window.setBorder(2f);
+        window.setBorderColor((int) 0xE8C547FFL);
+        window.setBorderEdgeRadius(8f, false);
+
+        UILabel title = new UILabel("Marketplace");
+        title.setPosition(20f, 12f, false);
+        title.setSize(650f, 42f, false);
+        title.setFontSize(28f);
+        title.setFontColor((int) 0xF4E3A1FFL);
+        title.setTextAlign(TextAnchor.MiddleLeft);
+        window.addChild(title);
+
+        UILabel closeButton = new UILabel("X");
+        closeButton.setPosition(704f, 12f, false);
+        closeButton.setSize(36f, 36f, false);
+        closeButton.setFontSize(22f);
+        closeButton.setTextAlign(TextAnchor.MiddleCenter);
+        closeButton.setBackgroundColor((int) 0x8B2D2DFFL);
+        closeButton.setClickable(true);
+        window.addChild(closeButton);
+
+        UIScrollView categoryTabs = new UIScrollView(UIScrollView.ScrollViewMode.Horizontal);
+        categoryTabs.setPosition(20f, 62f, false);
+        categoryTabs.setSize(720f, 46f, false);
+        categoryTabs.setVerticalScrollerVisibility(UIScrollView.ScrollerVisibility.Hidden);
+        categoryTabs.setHorizontalScrollerVisibility(UIScrollView.ScrollerVisibility.Auto);
+        categoryTabs.setMouseWheelScrollSize(130f);
+        window.addChild(categoryTabs);
+
+        UILabel searchLabel = new UILabel("Search:");
+        searchLabel.setPosition(20f, 116f, false);
+        searchLabel.setSize(82f, 38f, false);
+        searchLabel.setFontSize(18f);
+        searchLabel.setFontColor((int) 0xF4E3A1FFL);
+        searchLabel.setTextAlign(TextAnchor.MiddleLeft);
+        window.addChild(searchLabel);
+
+        UITextField searchField = new UITextField("");
+        searchField.setPosition(102f, 116f, false);
+        searchField.setSize(638f, 38f, false);
+        searchField.setFontSize(18f);
+        searchField.setFontColor((int) 0xFFFFFFFFL);
+        searchField.setBackgroundColor((int) 0x202832FFL);
+        searchField.setBorder(1f);
+        searchField.setBorderColor((int) 0x566273FFL);
+        searchField.setBorderEdgeRadius(4f, false);
+        searchField.setMaxCharacters(80);
+        window.addChild(searchField);
+
+        UIScrollView itemList = new UIScrollView(UIScrollView.ScrollViewMode.Vertical);
+        itemList.setPosition(20f, 164f, false);
+        itemList.setSize(720f, 436f, false);
+        itemList.setVerticalScrollerVisibility(UIScrollView.ScrollerVisibility.Auto);
+        itemList.setHorizontalScrollerVisibility(UIScrollView.ScrollerVisibility.Hidden);
+        itemList.setMouseWheelScrollSize(92f);
+        window.addChild(itemList);
+
+        StoreView view = new StoreView(window, closeButton, searchField, itemList);
+        List<String> categories = new ArrayList<>();
+        categories.add("All");
+        storeCatalog.items().stream().map(StoreCatalog.StoreItem::category).distinct().forEach(categories::add);
+        float tabX = 0f;
+        for (String category : categories) {
+            UILabel tab = new UILabel(formatCategoryName(category));
+            tab.setPosition(tabX, 0f, false);
+            tab.setSize(130f, 38f, false);
+            tab.setFontSize(16f);
+            tab.setFontColor((int) 0xFFFFFFFFL);
+            tab.setTextAlign(TextAnchor.MiddleCenter);
+            tab.setBorderEdgeRadius(4f, false);
+            tab.setClickable(true);
+            categoryTabs.addChild(tab);
+            view.categoriesByButtonId().put(tab.getID(), category);
+            view.categoryButtons().put(category, tab);
+            tabX += 136f;
+        }
+        updateStoreCategoryStyles(view);
+        rebuildStoreItems(view);
+
+        storeViews.put(player.getUID(), view);
+        player.addUIElement(window);
+        player.setMouseCursorVisible(true);
+    }
+
+    private void rebuildStoreItems(StoreView view) {
+        view.itemList().removeAllChilds();
+        view.itemsByButtonId().clear();
+        int itemIndex = 0;
+        float yOffset = 0f;
+        for (StoreCatalog.StoreItem storeItem : storeCatalog.items()) {
+            if (!"All".equals(view.selectedCategory())
+                    && !storeItem.category().equals(view.selectedCategory())) {
+                continue;
+            }
+            if (!view.searchText().isBlank()
+                    && !storeItem.name().toLowerCase(Locale.US).contains(view.searchText())) {
+                continue;
+            }
+
+            UIElement itemRow = new UIElement();
+            itemRow.setPosition(0f, yOffset, false);
+            itemRow.setSize(690f, 86f, false);
+            itemRow.setBackgroundColor(itemIndex % 2 == 0
+                    ? (int) 0x28313DFFL : (int) 0x202832FFL);
+            itemRow.setBorderEdgeRadius(6f, false);
+            view.itemList().addChild(itemRow);
+
+            UIElement icon = new UIElement();
+            icon.setPosition(6f, 5f, false);
+            icon.setSize(76f, 76f, false);
+            icon.setBackgroundColor((int) 0x11161DFFL);
+            icon.setBorder(1f);
+            icon.setBorderColor((int) 0x566273FFL);
+            icon.setBorderEdgeRadius(5f, false);
+            Items.ItemDefinition definition = Definitions.getItemDefinition(storeItem.id());
+            TextureAsset iconTexture = definition == null ? null : definition.getIcon(0);
+            if (iconTexture != null) {
+                icon.style.backgroundImage.set(iconTexture);
+                icon.style.backgroundImageScaleMode.set(ScaleMode.ScaleToFit);
+            }
+            itemRow.addChild(icon);
+
+            UILabel itemDetails = new UILabel(storeItem.name() + "\n" + formatBalance(storeItem.price()));
+            itemDetails.setPosition(98f, 7f, false);
+            itemDetails.setSize(430f, 72f, false);
+            itemDetails.setFontSize(18f);
+            itemDetails.setFontColor((int) 0xFFFFFFFFL);
+            itemDetails.setTextAlign(TextAnchor.MiddleLeft);
+            itemRow.addChild(itemDetails);
+
+            UILabel buyButton = new UILabel("BUY");
+            buyButton.setPosition(570f, 20f, false);
+            buyButton.setSize(100f, 46f, false);
+            buyButton.setFontSize(18f);
+            buyButton.setFontColor((int) 0xFFFFFFFFL);
+            buyButton.setTextAlign(TextAnchor.MiddleCenter);
+            buyButton.setBackgroundColor((int) 0x2D7D46FFL);
+            buyButton.setBorder(1f);
+            buyButton.setBorderColor((int) 0x77FF99FFL);
+            buyButton.setBorderEdgeRadius(5f, false);
+            buyButton.setClickable(true);
+            itemRow.addChild(buyButton);
+            view.itemsByButtonId().put(buyButton.getID(), storeItem);
+            itemIndex++;
+            yOffset += 92f;
+        }
+
+        if (itemIndex == 0) {
+            UILabel empty = new UILabel("No items match this category and search.");
+            empty.setPosition(0f, 20f, false);
+            empty.setSize(690f, 50f, false);
+            empty.setFontSize(18f);
+            empty.setFontColor((int) 0xAAAAAAFFL);
+            empty.setTextAlign(TextAnchor.MiddleCenter);
+            view.itemList().addChild(empty);
+        }
+    }
+
+    private static void updateStoreCategoryStyles(StoreView view) {
+        view.categoryButtons().forEach((category, button) -> button.setBackgroundColor(
+                category.equals(view.selectedCategory()) ? (int) 0x9A7B24FFL : (int) 0x28313DFFL));
+    }
+
+    private void closeStore(Player player) {
+        StoreView view = storeViews.remove(player.getUID());
+        if (view != null) {
+            player.removeUIElement(view.window());
+        }
+        player.setMouseCursorVisible(false);
+    }
+
+    private void purchaseStoreItem(Player player, StoreCatalog.StoreItem storeItem) {
+        if (!economy.withdraw(player.getUID(), storeItem.price())) {
+            player.sendTextMessage("<color=#FF7777>You cannot afford " + storeItem.name()
+                    + " for " + formatBalance(storeItem.price()) + ".</color>");
+            return;
+        }
+
+        Item addedItem = player.getInventory().addItem(storeItem.id(), 0, 1);
+        if (addedItem == null) {
+            economy.deposit(player.getUID(), storeItem.price());
+            updateBalanceLabel(player);
+            player.sendTextMessage("<color=#FF7777>Your inventory is full. The purchase was refunded.</color>");
+            return;
+        }
+
+        updateBalanceLabel(player);
+        player.sendTextMessage("<color=#77FF99>Purchased " + storeItem.name() + " for "
+                + formatBalance(storeItem.price()) + ".</color>");
+    }
+
     /** Refreshes the HUD after another plugin changes a connected player's balance. */
     public void updateBalanceLabel(Player player) {
         UILabel label = balanceLabels.get(player.getUID());
@@ -469,5 +716,82 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         private int periodStartHour() {
             return period * 8;
         }
+    }
+
+    private static String formatCategoryName(String category) {
+        String words = category.replace('_', ' ').toLowerCase(Locale.US);
+        return words.isEmpty() ? "Other" : Character.toUpperCase(words.charAt(0)) + words.substring(1);
+    }
+
+    private static void debug(String message) {
+        System.out.println("[RisingWorldStarter/DEBUG] " + message);
+    }
+
+    @EventMethod
+    public void onStoreClick(PlayerUIElementClickEvent event) {
+        Player player = event.getPlayer();
+        StoreView view = storeViews.get(player.getUID());
+        if (view == null) {
+            return;
+        }
+        int elementId = event.getUIElement().getID();
+        if (elementId == view.closeButton().getID()) {
+            closeStore(player);
+            return;
+        }
+        String category = view.categoriesByButtonId().get(elementId);
+        if (category != null) {
+            view.setSelectedCategory(category);
+            updateStoreCategoryStyles(view);
+            rebuildStoreItems(view);
+            return;
+        }
+        StoreCatalog.StoreItem storeItem = view.itemsByButtonId().get(elementId);
+        if (storeItem != null) {
+            purchaseStoreItem(player, storeItem);
+        }
+    }
+
+    @EventMethod
+    public void onStoreSearchChanged(PlayerUITextFieldChangeEvent event) {
+        StoreView view = storeViews.get(event.getPlayer().getUID());
+        if (view == null || event.getUITextField().getID() != view.searchField().getID()) {
+            return;
+        }
+        String search = event.getNewText() == null ? "" : event.getNewText();
+        view.setSearchText(search.trim().toLowerCase(Locale.US));
+        rebuildStoreItems(view);
+    }
+
+    private static final class StoreView {
+        private final UIElement window;
+        private final UILabel closeButton;
+        private final UITextField searchField;
+        private final UIScrollView itemList;
+        private final Map<Integer, StoreCatalog.StoreItem> itemsByButtonId = new ConcurrentHashMap<>();
+        private final Map<Integer, String> categoriesByButtonId = new ConcurrentHashMap<>();
+        private final Map<String, UILabel> categoryButtons = new ConcurrentHashMap<>();
+        private String selectedCategory = "All";
+        private String searchText = "";
+
+        private StoreView(UIElement window, UILabel closeButton, UITextField searchField,
+                          UIScrollView itemList) {
+            this.window = window;
+            this.closeButton = closeButton;
+            this.searchField = searchField;
+            this.itemList = itemList;
+        }
+
+        private UIElement window() { return window; }
+        private UILabel closeButton() { return closeButton; }
+        private UITextField searchField() { return searchField; }
+        private UIScrollView itemList() { return itemList; }
+        private Map<Integer, StoreCatalog.StoreItem> itemsByButtonId() { return itemsByButtonId; }
+        private Map<Integer, String> categoriesByButtonId() { return categoriesByButtonId; }
+        private Map<String, UILabel> categoryButtons() { return categoryButtons; }
+        private String selectedCategory() { return selectedCategory; }
+        private void setSelectedCategory(String selectedCategory) { this.selectedCategory = selectedCategory; }
+        private String searchText() { return searchText; }
+        private void setSearchText(String searchText) { this.searchText = searchText; }
     }
 }

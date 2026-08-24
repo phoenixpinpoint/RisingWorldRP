@@ -10,7 +10,7 @@ version = '1.0.0'
 def configuredRisingWorldPath = providers.gradleProperty('risingWorldPath')
         .orElse(providers.environmentVariable('RISING_WORLD_PATH'))
 
-def configFile = file('build.config.json')
+def configFile = file('config/build.config.json')
 if (!configuredRisingWorldPath.present && configFile.isFile()) {
     def configuredPath = new JsonSlurper().parse(configFile).risingWorldPath
     if (configuredPath instanceof String && !configuredPath.isBlank()) {
@@ -66,6 +66,14 @@ tasks.register('installPlugin', Copy) {
     description = 'Builds and installs the plugin into the configured Rising World installation.'
     dependsOn tasks.named('jar')
     from tasks.named('jar').flatMap { it.archiveFile }
+    into risingWorldDirectory.map { new File(it, 'Plugins/RisingWorldStarter') }
+}
+
+tasks.register('installConfig', Copy) {
+    group = 'Rising World'
+    description = 'Explicitly copies project configuration templates into the plugin directory.'
+    from layout.projectDirectory.dir('config')
+    include '*.properties'
     into risingWorldDirectory.map { new File(it, 'Plugins/RisingWorldStarter') }
 }
 

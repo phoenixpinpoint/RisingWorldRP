@@ -8,7 +8,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$buildConfigPath = Join-Path $projectRoot 'build.config.json'
+$buildConfigPath = Join-Path $projectRoot 'config\build.config.json'
 
 # Resolution order: command-line parameter, environment variable, local JSON config.
 if ([string]::IsNullOrWhiteSpace($RisingWorldPath)) {
@@ -21,7 +21,7 @@ if ([string]::IsNullOrWhiteSpace($RisingWorldPath) -and (Test-Path -LiteralPath 
 }
 
 if ([string]::IsNullOrWhiteSpace($RisingWorldPath)) {
-    throw "Set risingWorldPath in build.config.json, set RISING_WORLD_PATH, or pass -RisingWorldPath 'C:\path\to\RisingWorld'."
+    throw "Set risingWorldPath in config\build.config.json, set RISING_WORLD_PATH, or pass -RisingWorldPath 'C:\path\to\RisingWorld'."
 }
 
 $RisingWorldPath = [System.IO.Path]::GetFullPath($RisingWorldPath)
