@@ -1,7 +1,7 @@
 # Rising World Starter Plugin
 
 This is a minimal Java project for the **Rising World Unity-version Plugin API**.
-It deliberately uses the SDK and JDK included with your copy of Rising World, so its API matches your game installation.
+It compiles against the SDK included with your copy of Rising World, so its API matches your game installation.
 
 ## First build
 
@@ -14,36 +14,38 @@ It deliberately uses the SDK and JDK included with your copy of Rising World, so
    }
    ```
 
-3. Open PowerShell in this project folder and build:
+3. Install a Java 20 or newer JDK, then build from a terminal:
 
-   ```powershell
-   .\build.ps1
+   ```text
+   Windows:  gradlew.bat build
+   macOS:    ./gradlew build
+   Linux:    ./gradlew build
    ```
 
 You can override the JSON setting for a single build:
 
-   ```powershell
-   .\build.ps1 -RisingWorldPath 'C:\Program Files (x86)\Steam\steamapps\common\Rising World'
+   ```text
+   ./gradlew build -PrisingWorldPath="/path/to/Rising World"
    ```
 
 Or override it with an environment variable:
 
-   ```powershell
-   $env:RISING_WORLD_PATH = 'C:\Program Files (x86)\Steam\steamapps\common\Rising World'
-   .\build.ps1
+   ```text
+   RISING_WORLD_PATH="/path/to/Rising World" ./gradlew build
    ```
 
-The resolution order is command-line parameter, `RISING_WORLD_PATH` environment
+On Windows, use `gradlew.bat` in the examples above. The resolution order is the
+`-PrisingWorldPath` Gradle property, `RISING_WORLD_PATH` environment
 variable, then `build.config.json`.
 
-The finished plugin is `build\RisingWorldStarter.jar`.
+The finished plugin is `build/RisingWorldStarter.jar`.
 
 ## Install for testing
 
-Run this to build and install it into Rising World's `Plugins\RisingWorldStarter` directory:
+Run this to build and install it into Rising World's `Plugins/RisingWorldStarter` directory:
 
-```powershell
-.\build.ps1 -RisingWorldPath 'C:\Program Files (x86)\Steam\steamapps\common\Rising World' -Install
+```text
+./gradlew installPlugin -PrisingWorldPath="/path/to/Rising World"
 ```
 
 Restart the game/server. Its console/log should report `[RisingWorldStarter] Enabled ...`.
@@ -106,6 +108,8 @@ is stored by player UID in `claim-admins.properties`.
 src/        Java source code
 resources/  plugin.yml, packaged into the root of the JAR
 build/      generated output (safe to delete)
+build.gradle and settings.gradle  portable Gradle build configuration
+gradlew and gradlew.bat            Gradle wrapper launchers
 ```
 
 Your main class must extend `net.risingworld.api.Plugin` and implement `onEnable()` and `onDisable()`. Its full package/class name must exactly match `main:` in `resources/plugin.yml`. The build packages this definition as `resources/plugin.yml` inside the JAR, as required by Rising World.

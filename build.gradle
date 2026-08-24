@@ -1,0 +1,76 @@
+import groovy.json.JsonSlurper
+
+plugins {
+    id 'java'
+}
+
+group = 'com.example'
+version = '1.0.0'
+
+def configuredRisingWorldPath = providers.gradleProperty('risingWorldPath')
+        .orElse(providers.environmentVariable('RISING_WORLD_PATH'))
+
+def configFile = file('build.config.json')
+if (!configuredRisingWorldPath.present && configFile.isFile()) {
+    def configuredPath = new JsonSlurper().parse(configFile).risingWorldPath
+    if (configuredPath instanceof String && !configuredPath.isBlank()) {
+        configuredRisingWorldPath = providers.provider { configuredPath }
+    }
+}
+
+def risingWorldDirectory = configuredRisingWorldPath.map { file(it) }
+def sdkJar = risingWorldDirectory.map { directory ->
+    def sdkDirectory = new File(directory, 'Data/SDK')
+    def preferredJar = new File(sdkDirectory, 'PluginAPI.jar')
+    if (preferredJar.isFile()) {
+        return preferredJar
+    }
+
+    def jars = fileTree(sdkDirectory) { include '*.jar' }.files.sort()
+    if (jars.empty) {
+        throw new GradleException("No Rising World API JAR found in ${sdkDirectory}")
+    }
+    return jars.first()
+}
+
+sourceSets {
+    main {
+        java.srcDirs = ['src']
+        resources.srcDirs = ['.']
+        resources.include 'resources/**'
+    }
+}
+
+dependencies {
+    compileOnly files(sdkJar)
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_20
+    targetCompatibility = JavaVersion.VERSION_20
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 20
+}
+
+tasks.named('jar') {
+    archiveBaseName = 'RisingWorldStarter'
+    archiveVersion = ''
+    destinationDirectory = layout.buildDirectory
+}
+
+tasks.register('installPlugin', Copy) {
+    group = 'Rising World'
+    description = 'Builds and installs the plugin into the configured Rising World installation.'
+    dependsOn tasks.named('jar')
+    from tasks.named('jar').flatMap { it.archiveFile }
+    into risingWorldDirectory.map { new File(it, 'Plugins/RisingWorldStarter') }
+}
+
+tasks.register('printRisingWorldSdk') {
+    group = 'Rising World'
+    description = 'Prints the Rising World API JAR used for compilation.'
+    doLast { println sdkJar.get() }
+}
