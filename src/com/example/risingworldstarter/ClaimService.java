@@ -46,6 +46,17 @@ final class ClaimService {
         return claims.size();
     }
 
+    synchronized void migrateOwner(String oldOwnerUid, String newOwnerUid, String newOwnerName) {
+        boolean changed = false;
+        for (Map.Entry<String, Claim> entry : claims.entrySet()) {
+            if (entry.getValue().ownerUid().equals(oldOwnerUid)) {
+                entry.setValue(new Claim(newOwnerUid, newOwnerName));
+                changed = true;
+            }
+        }
+        if (changed) save();
+    }
+
     synchronized boolean claim(int chunkX, int chunkZ, String ownerUid, String ownerName) {
         String key = key(chunkX, chunkZ);
         if (claims.containsKey(key)) {

@@ -25,6 +25,7 @@ replay_pid*
 
 # Gradle output and local state
 .gradle/
+.gradle-user/
 build/
 
 # Machine-specific editor configuration

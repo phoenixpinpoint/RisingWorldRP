@@ -52,12 +52,18 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private final Map<String, Float> visualHeights = new ConcurrentHashMap<>();
     private final Map<String, StoreView> storeViews = new ConcurrentHashMap<>();
     private final Map<String, AdminView> adminViews = new ConcurrentHashMap<>();
+    private final Map<String, CharacterService.CharacterSummary> activeCharacters = new ConcurrentHashMap<>();
+    private final Map<String, CharacterSelectionView> characterSelectionViews = new ConcurrentHashMap<>();
     private EconomyApi economy;
     private ClaimService claims;
     private ClaimAdminService claimAdmins;
     private EconomySettings economySettings;
     private StoreCatalog storeCatalog;
+    private Path marketplaceConfigPath;
+    private volatile boolean storeCatalogLoaded;
+    private CharacterService characterService;
     private Timer worldClockTimer;
+    private Timer characterAutosaveTimer;
     private PayPeriod lastSalaryPeriod;
 
     @Override
@@ -72,6 +78,8 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         debug("Land claims loaded");
         claimAdmins = new ClaimAdminService(pluginPath.resolve("claim-admins.properties"));
         debug("Claim administrators loaded: " + claimAdmins.getAll().size());
+        characterService = new CharacterService(pluginPath.resolve("characters"));
+        debug("Character service loaded with four slots per account");
 
         Path economyConfigPath = pluginPath.resolve("economy.properties");
         economySettings = EconomySettings.load(economyConfigPath);
@@ -80,10 +88,14 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                 + ", claim cost=" + formatBalance(economySettings.claimCost())
                 + ", 8-hour salary=" + formatBalance(economySettings.baseSalary()));
 
-        Path marketplaceConfigPath = pluginPath.resolve("marketplace.json");
-        storeCatalog = StoreCatalog.load(marketplaceConfigPath);
-        debug("Marketplace config loaded from " + marketplaceConfigPath);
-        debug("Marketplace enabled items: " + storeCatalog.items().size());
+        // Item definitions are native game data and are not ready yet while a
+        // hosted world is starting. Loading them here can terminate the game
+        // process without a Java exception. Defer catalog creation until the
+        // first player has spawned, when the definition registry is available.
+        marketplaceConfigPath = pluginPath.resolve("marketplace.json");
+        storeCatalog = StoreCatalog.empty();
+        storeCatalogLoaded = false;
+        debug("Marketplace config queued for world-ready loading from " + marketplaceConfigPath);
 
         net.risingworld.api.objects.Time currentTime = Server.getGameTime();
         lastSalaryPeriod = PayPeriod.from(currentTime);
@@ -92,8 +104,18 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                 currentTime.getHours(), currentTime.getMinutes()));
         registerEventListener(this);
         debug("Event listener registered");
+        executeDelayed(0.5f, () -> {
+            for (Player player : Server.getAllPlayers()) {
+                if (player.isSpawned() && !activeCharacters.containsKey(player.getUID())) {
+                    initializeStoreCatalog();
+                    initializeCharacterSession(player);
+                }
+            }
+        });
         worldClockTimer = new Timer(1f, 0f, -1, this::updateWorldClockLabels);
         worldClockTimer.start();
+        characterAutosaveTimer = new Timer(60f, 60f, -1, this::saveActiveCharacters);
+        characterAutosaveTimer.start();
         debug("World clock and payroll timer started; payroll runs at 00:00, 08:00, and 16:00");
         debug("Commands registered: /balance, /bal, /store, /admin, /claim, /unclaim, /chunk, /claims, /claimadmin");
         System.out.println("[RisingWorldStarter] Enabled on Rising World " + getGameVersion());
@@ -101,6 +123,9 @@ public final class RisingWorldStarter extends Plugin implements Listener {
 
     @Override
     public void onDisable() {
+        if (characterService != null) {
+            saveActiveCharacters();
+        }
         if (worldClockTimer != null) {
             worldClockTimer.kill();
             worldClockTimer = null;
@@ -113,6 +138,9 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         visualHeights.clear();
         storeViews.clear();
         adminViews.clear();
+        activeCharacters.clear();
+        characterSelectionViews.clear();
+        storeCatalogLoaded = false;
         System.out.println("[RisingWorldStarter] Disabled");
     }
 
@@ -124,15 +152,53 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         return economy;
     }
 
+    /** Returns the economy/claim identity for the player's selected character. */
+    public String getActiveCharacterKey(Player player) {
+        return characterKey(player);
+    }
+
     @EventMethod
     public void onPlayerSpawn(PlayerSpawnEvent event) {
-        economy.createAccount(event.getPlayer().getUID(), economySettings.defaultBalance());
-        showBalance(event.getPlayer());
-        showWorldClock(event.getPlayer());
+        initializeStoreCatalog();
+        Player player = event.getPlayer();
+        debug("Player spawned; scheduling character initialization for " + player.getName());
+        executeDelayed(1f, () -> {
+            if (player.isSpawned()) {
+                initializeCharacterSession(player);
+            }
+        });
+    }
+
+    private synchronized void initializeStoreCatalog() {
+        if (storeCatalogLoaded) {
+            return;
+        }
+        storeCatalog = StoreCatalog.load(marketplaceConfigPath);
+        storeCatalogLoaded = true;
+        debug("Marketplace config loaded from " + marketplaceConfigPath);
+        debug("Marketplace enabled items: " + storeCatalog.items().size());
+    }
+
+    private void initializeCharacterSession(Player player) {
+        if (activeCharacters.containsKey(player.getUID()) || characterSelectionViews.containsKey(player.getUID())) {
+            return;
+        }
+        debug("Initializing character session for account " + player.getUID());
+        CharacterService.CharacterSummary legacy = characterService.ensureLegacyCharacter(player);
+        debug("Character slot data ready for account " + player.getUID());
+        if (!economy.hasAccount(legacy.economyKey())) {
+            long legacyBalance = economy.hasAccount(player.getUID())
+                    ? economy.getBalance(player.getUID()) : economySettings.defaultBalance();
+            economy.createAccount(legacy.economyKey(), legacyBalance);
+        }
+        claims.migrateOwner(player.getUID(), legacy.economyKey(), legacy.name());
+        showCharacterSelection(player);
     }
 
     @EventMethod
     public void onPlayerDisconnect(PlayerDisconnectEvent event) {
+        CharacterService.CharacterSummary active = activeCharacters.remove(event.getPlayer().getUID());
+        if (active != null) characterService.saveCharacter(event.getPlayer(), active);
         balanceLabels.remove(event.getPlayer().getUID());
         worldTimeLabels.remove(event.getPlayer().getUID());
         claimVisuals.remove(event.getPlayer().getUID());
@@ -140,6 +206,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         visualHeights.remove(event.getPlayer().getUID());
         storeViews.remove(event.getPlayer().getUID());
         adminViews.remove(event.getPlayer().getUID());
+        characterSelectionViews.remove(event.getPlayer().getUID());
     }
 
     @EventMethod
@@ -180,10 +247,15 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     public void onPlayerCommand(PlayerCommandEvent event) {
         String[] parts = event.getCommand().trim().split("\\s+", 3);
         String command = parts[0];
+        if (!activeCharacters.containsKey(event.getPlayer().getUID())) {
+            event.setCancelled(true);
+            event.getPlayer().sendTextMessage("<color=#FFAA66>Select or create a character first.</color>");
+            return;
+        }
         if (command.equalsIgnoreCase("/balance") || command.equalsIgnoreCase("/bal")) {
             event.setCancelled(true);
             Player player = event.getPlayer();
-            String formattedBalance = formatBalance(economy.getBalance(player.getUID()));
+            String formattedBalance = formatBalance(economy.getBalance(characterKey(player)));
             player.sendTextMessage("<color=#E8C547>Cash:</color> " + formattedBalance);
             updateBalanceLabel(player);
         } else if (command.equalsIgnoreCase("/store")) {
@@ -211,7 +283,8 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     }
 
     private void listOwnedChunks(Player player) {
-        List<ClaimedChunk> ownedChunks = claims.getClaimsByOwner(player.getUID());
+        String characterKey = characterKey(player);
+        List<ClaimedChunk> ownedChunks = claims.getClaimsByOwner(characterKey);
         if ("claims".equals(visualModes.get(player.getUID()))) {
             clearClaimVisuals(player);
             player.sendTextMessage("<color=#AAAAAA>Claim overview hidden.</color>");
@@ -260,7 +333,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         Vector3i chunk = player.getChunkPosition();
         Claim existing = claims.getClaim(chunk.x, chunk.z).orElse(null);
         if (existing != null) {
-            String owner = existing.ownerUid().equals(player.getUID()) ? "you" : existing.ownerName();
+            String owner = existing.ownerUid().equals(characterKey(player)) ? "you" : existing.ownerName();
             player.sendTextMessage("<color=#FF7777>Chunk " + chunk.x + ", " + chunk.z
                     + " is already claimed by " + owner + ".</color>");
             showCurrentChunk(player, false);
@@ -268,19 +341,20 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         }
 
         long claimCost = economySettings.claimCost();
-        long balance = economy.getBalance(player.getUID());
+        String characterKey = characterKey(player);
+        long balance = economy.getBalance(characterKey);
         if (balance < claimCost) {
             player.sendTextMessage("<color=#FF7777>Claiming this chunk costs " + formatBalance(claimCost)
                     + ". You only have " + formatBalance(balance) + ".</color>");
             return;
         }
 
-        if (!claims.claim(chunk.x, chunk.z, player.getUID(), player.getName())) {
+        if (!claims.claim(chunk.x, chunk.z, characterKey, player.getName())) {
             player.sendTextMessage("<color=#FF7777>That chunk was claimed before your request completed.</color>");
             return;
         }
         try {
-            if (!economy.withdraw(player.getUID(), claimCost)) {
+            if (!economy.withdraw(characterKey, claimCost)) {
                 claims.forceUnclaim(chunk.x, chunk.z);
                 player.sendTextMessage("<color=#FF7777>Your balance changed before payment completed.</color>");
                 return;
@@ -300,11 +374,11 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         Claim existing = claims.getClaim(chunk.x, chunk.z).orElse(null);
         if (existing == null) {
             player.sendTextMessage("<color=#AAAAAA>This chunk is not claimed.</color>");
-        } else if (!existing.ownerUid().equals(player.getUID()) && !isClaimAdmin(player)) {
+        } else if (!existing.ownerUid().equals(characterKey(player)) && !isClaimAdmin(player)) {
             player.sendTextMessage("<color=#FF7777>This chunk is claimed by " + existing.ownerName() + ".</color>");
         } else {
-            if (existing.ownerUid().equals(player.getUID())) {
-                claims.unclaim(chunk.x, chunk.z, player.getUID());
+            if (existing.ownerUid().equals(characterKey(player))) {
+                claims.unclaim(chunk.x, chunk.z, characterKey(player));
             } else {
                 claims.forceUnclaim(chunk.x, chunk.z);
             }
@@ -335,7 +409,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
             visual = createChunkVisual(chunk.x, chunk.z, groundY,
                     0.15f, 0.85f, 0.30f, 0.12f,
                     0.25f, 1.0f, 0.40f, 0.95f);
-        } else if (claim.ownerUid().equals(player.getUID())) {
+        } else if (claim.ownerUid().equals(characterKey(player))) {
             visual = createChunkVisual(chunk.x, chunk.z, groundY,
                     0.15f, 0.45f, 1.0f, 0.12f,
                     0.30f, 0.65f, 1.0f, 0.95f);
@@ -416,6 +490,99 @@ public final class RisingWorldStarter extends Plugin implements Listener {
 
     private boolean isClaimAdmin(Player player) {
         return player.isAdmin() || claimAdmins.contains(player.getUID());
+    }
+
+    private void showCharacterSelection(Player player) {
+        CharacterSelectionView oldView = characterSelectionViews.remove(player.getUID());
+        if (oldView != null) player.removeUIElement(oldView.window());
+
+        UIElement window = new UIElement();
+        window.setPosition(50f, 50f, true);
+        window.setPivot(Pivot.MiddleCenter);
+        window.setSize(560f, 420f, false);
+        window.setBackgroundColor((int) 0x161B22F8L);
+        window.setBorder(2f);
+        window.setBorderColor((int) 0xE8C547FFL);
+        window.setBorderEdgeRadius(8f, false);
+
+        UILabel title = new UILabel("Choose Your Character");
+        title.setPosition(20f, 14f, false);
+        title.setSize(520f, 48f, false);
+        title.setFontSize(28f);
+        title.setFontColor((int) 0xF4E3A1FFL);
+        title.setTextAlign(TextAnchor.MiddleCenter);
+        window.addChild(title);
+
+        Map<Integer, CharacterService.CharacterSummary> charactersByButtonId = new ConcurrentHashMap<>();
+        Map<Integer, Integer> createSlotsByButtonId = new ConcurrentHashMap<>();
+        Map<Integer, CharacterService.CharacterSummary> bySlot = new ConcurrentHashMap<>();
+        characterService.getCharacters(player.getUID()).forEach(character -> bySlot.put(character.slot(), character));
+        for (int slot = 1; slot <= CharacterService.MAX_SLOTS; slot++) {
+            CharacterService.CharacterSummary character = bySlot.get(slot);
+            UILabel slotButton = new UILabel(character == null
+                    ? "Slot " + slot + "\nCreate New Character"
+                    : "Slot " + slot + "\n" + character.name());
+            slotButton.setPosition(40f, 78f + (slot - 1) * 78f, false);
+            slotButton.setSize(480f, 64f, false);
+            slotButton.setFontSize(19f);
+            slotButton.setFontColor((int) 0xFFFFFFFFL);
+            slotButton.setTextAlign(TextAnchor.MiddleCenter);
+            slotButton.setBackgroundColor(character == null ? (int) 0x28313DFFL : (int) 0x345D82FFL);
+            slotButton.setBorder(1f);
+            slotButton.setBorderColor(character == null ? (int) 0x566273FFL : (int) 0x77AAFFFFL);
+            slotButton.setBorderEdgeRadius(5f, false);
+            slotButton.setClickable(true);
+            window.addChild(slotButton);
+            if (character == null) createSlotsByButtonId.put(slotButton.getID(), slot);
+            else charactersByButtonId.put(slotButton.getID(), character);
+        }
+
+        CharacterSelectionView view = new CharacterSelectionView(window, charactersByButtonId,
+                createSlotsByButtonId);
+        characterSelectionViews.put(player.getUID(), view);
+        player.addUIElement(window);
+        player.stopInput(true, true);
+        player.setMouseCursorVisible(true);
+    }
+
+    private void promptCreateCharacter(Player player, int slot) {
+        player.showInputMessageBox("Create Character", "Enter a character name (3-24 characters):", "",
+                name -> {
+                    if (name == null) return;
+                    try {
+                        CharacterService.CharacterSummary character = characterService.createCharacter(player, name, slot);
+                        activateCharacter(player, character);
+                    } catch (IllegalArgumentException | IllegalStateException exception) {
+                        player.showErrorMessageBox("Character creation failed", exception.getMessage());
+                    }
+                });
+    }
+
+    private void activateCharacter(Player player, CharacterService.CharacterSummary character) {
+        characterService.loadCharacter(player, character);
+        activeCharacters.put(player.getUID(), character);
+        economy.createAccount(character.economyKey(), economySettings.defaultBalance());
+        CharacterSelectionView view = characterSelectionViews.remove(player.getUID());
+        if (view != null) player.removeUIElement(view.window());
+        player.setMouseCursorVisible(false);
+        showBalance(player);
+        showWorldClock(player);
+        player.sendTextMessage("<color=#77FF99>Now playing as " + character.name() + ".</color>");
+        debug("Profile " + character.profileName() + " (" + player.getUID() + ") selected character "
+                + character.name() + " [slot " + character.slot() + "]");
+    }
+
+    private String characterKey(Player player) {
+        CharacterService.CharacterSummary character = activeCharacters.get(player.getUID());
+        if (character == null) throw new IllegalStateException("No active character for " + player.getUID());
+        return character.economyKey();
+    }
+
+    private void saveActiveCharacters() {
+        for (Player player : Server.getAllPlayers()) {
+            CharacterService.CharacterSummary active = activeCharacters.get(player.getUID());
+            if (active != null) characterService.saveCharacter(player, active);
+        }
     }
 
     private void toggleAdminDashboard(Player player) {
@@ -522,10 +689,14 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         Player[] players = Server.getAllPlayers();
         for (int index = 0; index < players.length; index++) {
             Player connectedPlayer = players[index];
+            CharacterService.CharacterSummary activeCharacter = activeCharacters.get(connectedPlayer.getUID());
+            String profileName = activeCharacter == null ? connectedPlayer.getName() : activeCharacter.profileName();
+            String characterName = activeCharacter == null ? "Selecting character" : activeCharacter.name();
             String role = connectedPlayer.isAdmin() ? "ADMIN" : "PLAYER";
-            UILabel row = new UILabel(connectedPlayer.getName() + "  [" + role + "]\n"
-                    + connectedPlayer.getUID() + "     Balance: "
-                    + formatBalance(economy.getBalance(connectedPlayer.getUID())));
+            UILabel row = new UILabel(profileName + "  [" + role + "]  |  Character: " + characterName + "\n"
+                    + "UID: " + connectedPlayer.getUID() + "     Balance: "
+                    + (activeCharacter != null
+                    ? formatBalance(economy.getBalance(characterKey(connectedPlayer))) : "Selecting character"));
             row.setPosition(0f, index * 58f, false);
             row.setSize(650f, 52f, false);
             row.setFontSize(16f);
@@ -596,7 +767,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                         administrator.sendTextMessage("<color=#AAAAAA>That player is no longer connected.</color>");
                         return;
                     }
-                    currentTarget.ban("Banned by administrator " + administrator.getName());
+                    Server.banPlayer(targetUid, "Banned by administrator " + administrator.getName(), -1);
                     System.out.println("[RisingWorldStarter] " + administrator.getName() + " banned "
                             + targetName + " (" + targetUid + ") from the admin dashboard");
                     executeDelayed(0.5f, () -> {
@@ -909,7 +1080,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         for (CartLine line : view.cart().values()) {
             total = Math.addExact(total, Math.multiplyExact(line.item().price(), line.quantity()));
         }
-        if (!economy.withdraw(player.getUID(), total)) {
+        if (!economy.withdraw(characterKey(player), total)) {
             player.sendTextMessage("<color=#FF7777>You cannot afford this cart total of "
                     + formatBalance(total) + ".</color>");
             return;
@@ -929,7 +1100,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         }
         completedItems.forEach(view.cart()::remove);
         if (refund > 0) {
-            economy.deposit(player.getUID(), refund);
+            economy.deposit(characterKey(player), refund);
             player.sendTextMessage("<color=#FFAA66>Some items did not fit. Refunded "
                     + formatBalance(refund) + "; those items remain in your cart.</color>");
         }
@@ -946,7 +1117,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     public void updateBalanceLabel(Player player) {
         UILabel label = balanceLabels.get(player.getUID());
         if (label != null) {
-            label.setText("Cash: " + formatBalance(economy.getBalance(player.getUID())));
+            label.setText("Cash: " + formatBalance(economy.getBalance(characterKey(player))));
         }
     }
 
@@ -1016,8 +1187,10 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                 + " connected player(s) at " + currentPeriod.periodStartHour() + ":00 on "
                 + currentPeriod.year() + "-" + currentPeriod.month() + "-" + currentPeriod.day());
         for (Player player : players) {
-            economy.createAccount(player.getUID(), economySettings.defaultBalance());
-            long newBalance = economy.deposit(player.getUID(), salary);
+            if (!activeCharacters.containsKey(player.getUID())) continue;
+            String characterKey = characterKey(player);
+            economy.createAccount(characterKey, economySettings.defaultBalance());
+            long newBalance = economy.deposit(characterKey, salary);
             updateBalanceLabel(player);
             player.sendTextMessage("<color=#77FF99>8-hour salary paid:</color> " + formatBalance(salary));
             System.out.println("[RisingWorldStarter] Paid " + player.getName() + " " + formatBalance(salary)
@@ -1057,6 +1230,21 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     @EventMethod
     public void onStoreClick(PlayerUIElementClickEvent event) {
         Player player = event.getPlayer();
+        CharacterSelectionView selectionView = characterSelectionViews.get(player.getUID());
+        if (selectionView != null) {
+            int selectionElementId = event.getUIElement().getID();
+            CharacterService.CharacterSummary character = selectionView.charactersByButtonId()
+                    .get(selectionElementId);
+            if (character != null) {
+                activateCharacter(player, character);
+                return;
+            }
+            Integer createSlot = selectionView.createSlotsByButtonId().get(selectionElementId);
+            if (createSlot != null) {
+                promptCreateCharacter(player, createSlot);
+                return;
+            }
+        }
         AdminView adminView = adminViews.get(player.getUID());
         if (adminView != null) {
             int adminElementId = event.getUIElement().getID();
@@ -1185,5 +1373,10 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                              UILabel summary, UIScrollView playerList,
                              Map<Integer, String> kickTargetsByButtonId,
                              Map<Integer, String> banTargetsByButtonId) {
+    }
+
+    private record CharacterSelectionView(UIElement window,
+                                          Map<Integer, CharacterService.CharacterSummary> charactersByButtonId,
+                                          Map<Integer, Integer> createSlotsByButtonId) {
     }
 }

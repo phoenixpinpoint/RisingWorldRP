@@ -1,8 +1,5 @@
 package com.example.risingworldstarter;
 
-import net.risingworld.api.definitions.Definitions;
-import net.risingworld.api.definitions.Items;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
@@ -30,6 +27,10 @@ final class StoreCatalog {
         this.items = List.copyOf(items);
     }
 
+    static StoreCatalog empty() {
+        return new StoreCatalog(List.of());
+    }
+
     static StoreCatalog load(Path path) {
         Properties properties = new Properties();
         if (Files.exists(path)) {
@@ -48,51 +49,28 @@ final class StoreCatalog {
             }
         }
 
-        boolean changed = false;
         List<StoreItem> enabledItems = new ArrayList<>();
-        Items.ItemDefinition[] definitions = Definitions.getAllItemDefinitions();
-        if (definitions == null) {
-            throw new IllegalStateException("Rising World returned no item-definition catalog");
-        }
-
-        int skippedDefinitions = 0;
         int blockedDefinitions = 0;
-        for (Items.ItemDefinition definition : definitions) {
-            if (definition == null) {
-                skippedDefinitions++;
-                continue;
-            }
-            String itemName = definition.name == null || definition.name.isBlank()
-                    ? "item-" + definition.id : definition.name;
-            String category = definition.category == null ? "Other" : definition.category.name();
-            boolean blocked = isBlocked(definition, itemName);
-            String prefix = "item." + definition.id + ".";
-            changed |= putDefault(properties, prefix + "name", itemName);
-            changed |= putDefault(properties, prefix + "category", category);
-            if (blocked) {
-                changed |= setIfDifferent(properties, prefix + "enabled", "false");
-                blockedDefinitions++;
-            } else {
-                changed |= putDefault(properties, prefix + "enabled", "true");
-            }
+        List<Integer> configuredIds = properties.stringPropertyNames().stream()
+                .map(key -> key.split("\\.", 3))
+                .filter(parts -> parts.length == 3 && parts[0].equals("item"))
+                .map(parts -> Integer.parseInt(parts[1]))
+                .distinct().sorted().toList();
+        for (int configuredId : configuredIds) {
+            String prefix = "item." + configuredId + ".";
+            String itemName = properties.getProperty(prefix + "name", "item-" + configuredId);
+            String category = properties.getProperty(prefix + "category", "Other");
+            boolean blocked = isBlocked(itemName, category);
+            if (blocked) blockedDefinitions++;
             String configuredPrice = properties.getProperty(prefix + "price");
             if (!blocked && Boolean.parseBoolean(properties.getProperty(prefix + "enabled"))
                     && configuredPrice != null && !configuredPrice.isBlank()) {
                 long price = toMinorUnits(configuredPrice, prefix + "price");
-                enabledItems.add(new StoreItem(definition.id, itemName, category, price));
+                enabledItems.add(new StoreItem((short) configuredId, itemName, category, price));
             }
         }
-
-        if (skippedDefinitions > 0) {
-            System.out.println("[RisingWorldStarter/DEBUG] Marketplace skipped " + skippedDefinitions
-                    + " empty item-definition slot(s) returned by Rising World");
-        }
         System.out.println("[RisingWorldStarter/DEBUG] Marketplace blocked " + blockedDefinitions
-                + " internal or NPC item definition(s)");
-
-        if (changed || !Files.exists(path)) {
-            saveJson(path, properties);
-        }
+                + " internal or NPC configured item(s)");
 
         enabledItems.sort(Comparator.comparing(StoreItem::category, String.CASE_INSENSITIVE_ORDER)
                 .thenComparing(StoreItem::name, String.CASE_INSENSITIVE_ORDER));
@@ -103,27 +81,11 @@ final class StoreCatalog {
         return items;
     }
 
-    private static boolean putDefault(Properties properties, String key, String value) {
-        if (properties.containsKey(key)) {
-            return false;
-        }
-        properties.setProperty(key, value);
-        return true;
-    }
-
-    private static boolean setIfDifferent(Properties properties, String key, String value) {
-        if (value.equals(properties.getProperty(key))) {
-            return false;
-        }
-        properties.setProperty(key, value);
-        return true;
-    }
-
-    private static boolean isBlocked(Items.ItemDefinition definition, String itemName) {
+    private static boolean isBlocked(String itemName, String category) {
         String normalizedName = itemName.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
         return BLOCKED_ITEM_NAMES.contains(normalizedName)
-                || definition.category == Items.Category.Npc
-                || definition.type == Items.Type.Npc;
+                || "npc".equalsIgnoreCase(category)
+                || "npcs".equalsIgnoreCase(category);
     }
 
     private static long toMinorUnits(String value, String settingName) {

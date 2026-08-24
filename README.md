@@ -103,11 +103,31 @@ Other plugins can access the API through the loaded plugin instance:
 RisingWorldStarter economyPlugin =
         (RisingWorldStarter) getPluginByName("RisingWorldStarter");
 EconomyApi economy = economyPlugin.getEconomyApi();
+String characterKey = economyPlugin.getActiveCharacterKey(player);
 
-economy.deposit(player.getUID(), 500);       // adds $5.00
-boolean paid = economy.withdraw(player.getUID(), 250);
+economy.deposit(characterKey, 500);       // adds $5.00
+boolean paid = economy.withdraw(characterKey, 250);
 economyPlugin.updateBalanceLabel(player);    // refresh connected player's HUD
 ```
+
+## Characters
+
+Every Rising World UID owns up to four character slots. On spawn, the player
+must select an existing character or create one in an empty slot. The selected
+character name becomes the visible in-game player name.
+
+On first use, the plugin creates slot 1 as a legacy character before changing
+the player. It captures the existing name, inventory, clothing, appearance,
+position, rotation, health, hunger, thirst, stamina, balance, and claims.
+Character-controlled data is stored beneath
+`Plugins/RisingWorldStarter/characters/` and autosaved every 60 seconds as well
+as on disconnect and plugin shutdown.
+
+Balances, salary, claims, inventory, appearance, status, position, and future
+skill data are character-specific. Administrator status, claim-administrator
+permission, bans, and the Rising World UID remain account-specific. The admin
+dashboard shows both the immutable profile name and selected character name;
+Kick and Ban actions always target the UID.
 
 ## Marketplace
 

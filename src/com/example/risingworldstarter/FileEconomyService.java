@@ -39,6 +39,11 @@ final class FileEconomyService implements EconomyApi {
     }
 
     @Override
+    public synchronized boolean hasAccount(String playerUid) {
+        return balances.containsKey(requireUid(playerUid));
+    }
+
+    @Override
     public synchronized long setBalance(String playerUid, long amount) {
         requireNonNegative(amount, "amount");
         balances.put(requireUid(playerUid), amount);

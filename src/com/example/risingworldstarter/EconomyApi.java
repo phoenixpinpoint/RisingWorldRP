@@ -10,6 +10,8 @@ public interface EconomyApi {
 
     long getBalance(String playerUid);
 
+    boolean hasAccount(String playerUid);
+
     long setBalance(String playerUid, long amount);
 
     long deposit(String playerUid, long amount);
