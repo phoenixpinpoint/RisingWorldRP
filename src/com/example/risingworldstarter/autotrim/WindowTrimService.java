@@ -48,7 +48,7 @@ public final class WindowTrimService {
         int carved = carveTerrainOpening(position, rotation, openingSize);
         int[] stats = new int[2];
         int constructionBlocks = carved == 0
-                ? trimConstructionOpening(position, openingSize, stats) : 0;
+                ? trimConstructionOpening(position, rotation, openingSize, stats) : 0;
         int total = carved + constructionBlocks;
         if (total > 0) {
             player.sendTextMessage("<color=#77FF99>Auto-trimmed " + total + " wall block"
@@ -124,7 +124,62 @@ public final class WindowTrimService {
         return carved;
     }
 
-    private int trimConstructionOpening(Vector3f position, Vector3f size, int[] stats) {
+    public int trimConstructionOnly(Vector3f position, Quaternion rotation, Vector3f size) {
+        return trimConstructionOpening(position, rotation, size, new int[2]);
+    }
+
+    public int countConstructionIntersections(Vector3f position, Quaternion rotation, Vector3f size) {
+        Vector3i openingChunk = Utils.ChunkUtils.getChunkPosition(position);
+        int intersections = 0;
+        for (int cx = openingChunk.x - 1; cx <= openingChunk.x + 1; cx++) {
+            for (int cz = openingChunk.z - 1; cz <= openingChunk.z + 1; cz++) {
+                var chunk = World.getChunk(cx, cz);
+                if (chunk == null || !chunk.isValid()) continue;
+                ConstructionElement[] elements = chunk.getAllConstructionElements();
+                if (elements == null) continue;
+                for (ConstructionElement wall : elements) {
+                    if (isWall(wall) && trimWall(wall, position, rotation, size, true)) intersections++;
+                }
+            }
+        }
+        return intersections;
+    }
+
+    /** Returns an orientation whose local X axis follows the wall at a position. */
+    public Quaternion resolveWallPlaneRotation(Vector3f position) {
+        Vector3i centerChunk = Utils.ChunkUtils.getChunkPosition(position);
+        Quaternion nearestRotation = null;
+        float nearestDepth = Float.MAX_VALUE;
+        for (int cx = centerChunk.x - 1; cx <= centerChunk.x + 1; cx++) {
+            for (int cz = centerChunk.z - 1; cz <= centerChunk.z + 1; cz++) {
+                var chunk = World.getChunk(cx, cz);
+                if (chunk == null || !chunk.isValid()) continue;
+                ConstructionElement[] elements = chunk.getAllConstructionElements();
+                if (elements == null) continue;
+                for (ConstructionElement wall : elements) {
+                    if (!isWall(wall)) continue;
+                    Vector3f size = wall.getScale();
+                    Quaternion rotation = wall.getRotation().copy();
+                    Vector3f local = rotation.inverse().mult(position.subtract(wall.getWorldPosition()));
+                    boolean widthIsX = size.x >= size.z;
+                    float width = widthIsX ? size.x : size.z;
+                    float depth = Math.abs(widthIsX ? local.z : local.x);
+                    float along = Math.abs(widthIsX ? local.x : local.z);
+                    if (along > width * 0.5f + 1.5f
+                            || Math.abs(local.y) > size.y * 0.5f + 1.5f
+                            || depth >= nearestDepth) continue;
+                    nearestDepth = depth;
+                    nearestRotation = widthIsX ? rotation
+                            : rotation.multLocal(new Quaternion().fromAngles(0f,
+                            (float) (Math.PI * 0.5), 0f));
+                }
+            }
+        }
+        return nearestRotation;
+    }
+
+    private int trimConstructionOpening(Vector3f position, Quaternion openingRotation,
+                                        Vector3f size, int[] stats) {
         Vector3i openingChunk = Utils.ChunkUtils.getChunkPosition(position);
         List<ConstructionElement> intersecting = new ArrayList<>();
         int scanned = 0;
@@ -139,13 +194,13 @@ public final class WindowTrimService {
                     scanned++;
                     if (intersecting.size() >= MAX_INTERSECTIONS || !isWall(wall)) continue;
                     compatible++;
-                    if (trimWall(wall, position, size, true)) intersecting.add(wall);
+                    if (trimWall(wall, position, openingRotation, size, true)) intersecting.add(wall);
                 }
             }
         }
         int trimmed = 0;
         for (ConstructionElement wall : intersecting) {
-            if (trimWall(wall, position, size, false)) trimmed++;
+            if (trimWall(wall, position, openingRotation, size, false)) trimmed++;
         }
         stats[0] = scanned;
         stats[1] = compatible;
@@ -165,7 +220,8 @@ public final class WindowTrimService {
     }
 
     private boolean trimWall(ConstructionElement wall, Vector3f openingPosition,
-                             Vector3f openingSize, boolean detectOnly) {
+                             Quaternion openingRotation, Vector3f openingSize,
+                             boolean detectOnly) {
         Vector3f wallSize = wall.getScale();
         if (wallSize == null) return false;
         wallSize = wallSize.copy();
@@ -173,18 +229,28 @@ public final class WindowTrimService {
         boolean widthIsX = wallSize.x >= wallSize.z;
         float wallWidth = widthIsX ? wallSize.x : wallSize.z;
         float thickness = widthIsX ? wallSize.z : wallSize.x;
-        float openingWidth = Math.max(openingSize.x, openingSize.z);
-        Vector3f local = rotation.inverse().mult(openingPosition.subtract(wall.getWorldPosition()));
+        Quaternion inverseWallRotation = rotation.inverse();
+        Vector3f local = inverseWallRotation.mult(openingPosition.subtract(wall.getWorldPosition()));
+        Vector3f openingRight = inverseWallRotation.mult(openingRotation.mult(Vector3f.RIGHT));
+        Vector3f openingForward = inverseWallRotation.mult(openingRotation.mult(Vector3f.FORWARD));
         float localWidth = widthIsX ? local.x : local.z;
         float localDepth = widthIsX ? local.z : local.x;
-        if (Math.abs(localDepth) > thickness * 0.5f + 0.45f) return false;
+        float rightWidth = Math.abs(widthIsX ? openingRight.x : openingRight.z);
+        float forwardWidth = Math.abs(widthIsX ? openingForward.x : openingForward.z);
+        float rightDepth = Math.abs(widthIsX ? openingRight.z : openingRight.x);
+        float forwardDepth = Math.abs(widthIsX ? openingForward.z : openingForward.x);
+        float openingHalfWidth = rightWidth * openingSize.x * 0.5f
+                + forwardWidth * openingSize.z * 0.5f;
+        float openingHalfDepth = rightDepth * openingSize.x * 0.5f
+                + forwardDepth * openingSize.z * 0.5f;
+        if (Math.abs(localDepth) > thickness * 0.5f + openingHalfDepth + 0.05f) return false;
 
         float minW = -wallWidth * 0.5f;
         float maxW = wallWidth * 0.5f;
         float minY = -wallSize.y * 0.5f;
         float maxY = wallSize.y * 0.5f;
-        float cutMinW = Math.max(minW, localWidth - openingWidth * 0.5f + FRAME_OVERLAP);
-        float cutMaxW = Math.min(maxW, localWidth + openingWidth * 0.5f - FRAME_OVERLAP);
+        float cutMinW = Math.max(minW, localWidth - openingHalfWidth + FRAME_OVERLAP);
+        float cutMaxW = Math.min(maxW, localWidth + openingHalfWidth - FRAME_OVERLAP);
         float cutMinY = Math.max(minY, local.y - openingSize.y * 0.5f + FRAME_OVERLAP);
         float cutMaxY = Math.min(maxY, local.y + openingSize.y * 0.5f - FRAME_OVERLAP);
         if (cutMaxW - cutMinW < 0.08f || cutMaxY - cutMinY < 0.08f) return false;

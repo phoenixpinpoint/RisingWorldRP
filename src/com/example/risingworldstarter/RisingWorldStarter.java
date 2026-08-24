@@ -1,6 +1,7 @@
 package com.example.risingworldstarter;
 
 import com.example.risingworldstarter.autotrim.WindowTrimService;
+import com.example.risingworldstarter.autotrim.DoorTrimService;
 import net.risingworld.api.Plugin;
 import net.risingworld.api.Server;
 import net.risingworld.api.Timer;
@@ -108,6 +109,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private volatile boolean storeCatalogLoaded;
     private CharacterService characterService;
     private WindowTrimService windowTrimService;
+    private DoorTrimService doorTrimService;
     private Timer worldClockTimer;
     private Timer characterAutosaveTimer;
     private PayPeriod lastSalaryPeriod;
@@ -140,6 +142,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         characterService = new CharacterService(worldDataPath.resolve("characters"));
         debug("Character service loaded with four slots per account");
         windowTrimService = new WindowTrimService(RisingWorldStarter::debug);
+        doorTrimService = new DoorTrimService(windowTrimService, RisingWorldStarter::debug);
         debug("Window auto-trim service loaded");
 
         Path economyConfigPath = worldDataPath.resolve("economy.properties");
@@ -437,6 +440,24 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                     openingSize, false, false)) {
                 event.getPlayer().sendTextMessage("<color=#AAAAAA>Auto-trim checking window geometry...</color>");
             }
+        } else if (!event.isCancelled()
+                && event.getObjectDefinition().type == net.risingworld.api.definitions.Objects.Type.Door) {
+            Vector3f reportedSize = event.getObjectDefinition().boundscale == null
+                    ? new Vector3f(1.2f, 2.15f, 0.15f)
+                    : event.getObjectDefinition().boundscale.mult(event.getScale());
+            Vector3f doorCenter = event.getPosition().copy();
+            Quaternion closedRotation = event.getRotation().copy();
+            long doorGlobalId = event.getGlobalID();
+            int doorChunkX = event.getChunkPositionX();
+            int doorChunkY = event.getChunkPositionY();
+            int doorChunkZ = event.getChunkPositionZ();
+            Player player = event.getPlayer();
+            player.sendTextMessage("<color=#AAAAAA>Auto-trim checking the door's opening arc...</color>");
+            executeDelayed(0.25f, () -> {
+                if (!player.isSpawned()) return;
+                doorTrimService.trim(player, doorGlobalId, doorChunkX, doorChunkY, doorChunkZ,
+                        doorCenter, closedRotation, reportedSize);
+            });
         }
     }
     @EventMethod public void onDestroyObject(PlayerDestroyObjectEvent event) {
