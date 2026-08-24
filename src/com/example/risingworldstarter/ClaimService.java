@@ -42,6 +42,10 @@ final class ClaimService {
                 .toList();
     }
 
+    synchronized int getClaimCount() {
+        return claims.size();
+    }
+
     synchronized boolean claim(int chunkX, int chunkZ, String ownerUid, String ownerName) {
         String key = key(chunkX, chunkZ);
         if (claims.containsKey(key)) {

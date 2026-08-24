@@ -65,6 +65,13 @@ Startup also writes `[RisingWorldStarter/DEBUG]` diagnostics showing the resolve
 data directory, loaded configuration, enabled marketplace item count, current
 world time, payroll schedule, event registration, and available commands.
 
+Server administrators can use `/admin` to open an in-game dashboard showing
+world time, player counts, claim totals, economy settings, enabled marketplace
+products, and the connected-player balance list. The dashboard includes Refresh
+and Close controls and is rejected for non-administrators. Each connected player
+has a Kick button and a Ban button; permanent bans require confirmation, and an
+administrator cannot kick or ban their own session from the dashboard.
+
 ## Economy API
 
 Players see their current balance on the HUD after spawning. They can also use

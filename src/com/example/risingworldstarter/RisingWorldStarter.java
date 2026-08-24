@@ -3,6 +3,7 @@ package com.example.risingworldstarter;
 import net.risingworld.api.Plugin;
 import net.risingworld.api.Server;
 import net.risingworld.api.Timer;
+import net.risingworld.api.World;
 import net.risingworld.api.events.EventMethod;
 import net.risingworld.api.events.Listener;
 import net.risingworld.api.events.general.SkipNightEvent;
@@ -20,6 +21,7 @@ import net.risingworld.api.objects.Area;
 import net.risingworld.api.objects.Item;
 import net.risingworld.api.ui.UIElement;
 import net.risingworld.api.ui.UILabel;
+import net.risingworld.api.ui.MessageBoxButtons;
 import net.risingworld.api.ui.UIScrollView;
 import net.risingworld.api.ui.UITextField;
 import net.risingworld.api.ui.style.Pivot;
@@ -49,6 +51,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private final Map<String, String> visualModes = new ConcurrentHashMap<>();
     private final Map<String, Float> visualHeights = new ConcurrentHashMap<>();
     private final Map<String, StoreView> storeViews = new ConcurrentHashMap<>();
+    private final Map<String, AdminView> adminViews = new ConcurrentHashMap<>();
     private EconomyApi economy;
     private ClaimService claims;
     private ClaimAdminService claimAdmins;
@@ -92,7 +95,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         worldClockTimer = new Timer(1f, 0f, -1, this::updateWorldClockLabels);
         worldClockTimer.start();
         debug("World clock and payroll timer started; payroll runs at 00:00, 08:00, and 16:00");
-        debug("Commands registered: /balance, /bal, /store, /claim, /unclaim, /chunk, /claims, /claimadmin");
+        debug("Commands registered: /balance, /bal, /store, /admin, /claim, /unclaim, /chunk, /claims, /claimadmin");
         System.out.println("[RisingWorldStarter] Enabled on Rising World " + getGameVersion());
     }
 
@@ -109,6 +112,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         visualModes.clear();
         visualHeights.clear();
         storeViews.clear();
+        adminViews.clear();
         System.out.println("[RisingWorldStarter] Disabled");
     }
 
@@ -135,6 +139,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         visualModes.remove(event.getPlayer().getUID());
         visualHeights.remove(event.getPlayer().getUID());
         storeViews.remove(event.getPlayer().getUID());
+        adminViews.remove(event.getPlayer().getUID());
     }
 
     @EventMethod
@@ -184,6 +189,9 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         } else if (command.equalsIgnoreCase("/store")) {
             event.setCancelled(true);
             toggleStore(event.getPlayer());
+        } else if (command.equalsIgnoreCase("/admin")) {
+            event.setCancelled(true);
+            toggleAdminDashboard(event.getPlayer());
         } else if (command.equalsIgnoreCase("/claim")) {
             event.setCancelled(true);
             claimCurrentChunk(event.getPlayer());
@@ -410,10 +418,209 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         return player.isAdmin() || claimAdmins.contains(player.getUID());
     }
 
+    private void toggleAdminDashboard(Player player) {
+        if (!player.isAdmin()) {
+            player.sendTextMessage("<color=#FF7777>Only a server administrator can open the admin dashboard.</color>");
+            return;
+        }
+        if (adminViews.containsKey(player.getUID())) {
+            closeAdminDashboard(player);
+        } else {
+            if (storeViews.containsKey(player.getUID())) {
+                closeStore(player);
+            }
+            openAdminDashboard(player);
+        }
+    }
+
+    private void openAdminDashboard(Player player) {
+        UIElement window = new UIElement();
+        window.setPosition(50f, 50f, true);
+        window.setPivot(Pivot.MiddleCenter);
+        window.setSize(720f, 560f, false);
+        window.setBackgroundColor((int) 0x161B22F2L);
+        window.setBorder(2f);
+        window.setBorderColor((int) 0xD45B5BFFL);
+        window.setBorderEdgeRadius(8f, false);
+
+        UILabel title = new UILabel("Administrator Dashboard");
+        title.setPosition(20f, 12f, false);
+        title.setSize(560f, 42f, false);
+        title.setFontSize(27f);
+        title.setFontColor((int) 0xFFD0D0FFL);
+        title.setTextAlign(TextAnchor.MiddleLeft);
+        window.addChild(title);
+
+        UILabel refreshButton = new UILabel("REFRESH");
+        refreshButton.setPosition(576f, 14f, false);
+        refreshButton.setSize(90f, 36f, false);
+        refreshButton.setFontSize(14f);
+        refreshButton.setTextAlign(TextAnchor.MiddleCenter);
+        refreshButton.setBackgroundColor((int) 0x345D82FFL);
+        refreshButton.setClickable(true);
+        window.addChild(refreshButton);
+
+        UILabel closeButton = new UILabel("X");
+        closeButton.setPosition(670f, 14f, false);
+        closeButton.setSize(32f, 36f, false);
+        closeButton.setFontSize(20f);
+        closeButton.setTextAlign(TextAnchor.MiddleCenter);
+        closeButton.setBackgroundColor((int) 0x8B2D2DFFL);
+        closeButton.setClickable(true);
+        window.addChild(closeButton);
+
+        UILabel summary = new UILabel();
+        summary.setPosition(20f, 65f, false);
+        summary.setSize(680f, 145f, false);
+        summary.setFontSize(17f);
+        summary.setFontColor((int) 0xFFFFFFFFL);
+        summary.setTextAlign(TextAnchor.UpperLeft);
+        summary.setBackgroundColor((int) 0x202832FFL);
+        summary.setBorderEdgeRadius(5f, false);
+        window.addChild(summary);
+
+        UILabel playersTitle = new UILabel("Connected Players");
+        playersTitle.setPosition(20f, 220f, false);
+        playersTitle.setSize(680f, 34f, false);
+        playersTitle.setFontSize(20f);
+        playersTitle.setFontColor((int) 0xF4E3A1FFL);
+        playersTitle.setTextAlign(TextAnchor.MiddleLeft);
+        window.addChild(playersTitle);
+
+        UIScrollView playerList = new UIScrollView(UIScrollView.ScrollViewMode.Vertical);
+        playerList.setPosition(20f, 258f, false);
+        playerList.setSize(680f, 282f, false);
+        playerList.setVerticalScrollerVisibility(UIScrollView.ScrollerVisibility.Auto);
+        playerList.setHorizontalScrollerVisibility(UIScrollView.ScrollerVisibility.Hidden);
+        playerList.setMouseWheelScrollSize(42f);
+        window.addChild(playerList);
+
+        AdminView view = new AdminView(window, closeButton, refreshButton, summary, playerList,
+                new ConcurrentHashMap<>(), new ConcurrentHashMap<>());
+        adminViews.put(player.getUID(), view);
+        refreshAdminDashboard(view);
+        player.addUIElement(window);
+        player.setMouseCursorVisible(true);
+    }
+
+    private void refreshAdminDashboard(AdminView view) {
+        net.risingworld.api.objects.Time time = Server.getGameTime();
+        view.summary().setText(String.format(Locale.US,
+                "World: %s     Time: Y%d M%d D%d %02d:%02d\n"
+                        + "Players: %d / %d     Claims: %d     Claim admins: %d\n"
+                        + "Starting cash: %s     Claim cost: %s     8-hour salary: %s\n"
+                        + "Marketplace products enabled: %d",
+                World.getName(), time.getYear(), time.getMonth(), time.getDay(),
+                time.getHours(), time.getMinutes(), Server.getPlayerCount(), Server.getMaxPlayerCount(),
+                claims.getClaimCount(), claimAdmins.getAll().size(),
+                formatBalance(economySettings.defaultBalance()), formatBalance(economySettings.claimCost()),
+                formatBalance(economySettings.baseSalary()), storeCatalog.items().size()));
+
+        view.playerList().removeAllChilds();
+        view.kickTargetsByButtonId().clear();
+        view.banTargetsByButtonId().clear();
+        Player[] players = Server.getAllPlayers();
+        for (int index = 0; index < players.length; index++) {
+            Player connectedPlayer = players[index];
+            String role = connectedPlayer.isAdmin() ? "ADMIN" : "PLAYER";
+            UILabel row = new UILabel(connectedPlayer.getName() + "  [" + role + "]\n"
+                    + connectedPlayer.getUID() + "     Balance: "
+                    + formatBalance(economy.getBalance(connectedPlayer.getUID())));
+            row.setPosition(0f, index * 58f, false);
+            row.setSize(650f, 52f, false);
+            row.setFontSize(16f);
+            row.setFontColor((int) 0xFFFFFFFFL);
+            row.setTextAlign(TextAnchor.MiddleLeft);
+            row.setBackgroundColor(index % 2 == 0 ? (int) 0x28313DFFL : (int) 0x202832FFL);
+            row.setBorderEdgeRadius(4f, false);
+            view.playerList().addChild(row);
+
+            UILabel kickButton = new UILabel("KICK");
+            kickButton.setPosition(470f, 8f, false);
+            kickButton.setSize(78f, 36f, false);
+            kickButton.setFontSize(14f);
+            kickButton.setTextAlign(TextAnchor.MiddleCenter);
+            kickButton.setBackgroundColor((int) 0x9A6A24FFL);
+            kickButton.setClickable(true);
+            row.addChild(kickButton);
+            view.kickTargetsByButtonId().put(kickButton.getID(), connectedPlayer.getUID());
+
+            UILabel banButton = new UILabel("BAN");
+            banButton.setPosition(558f, 8f, false);
+            banButton.setSize(78f, 36f, false);
+            banButton.setFontSize(14f);
+            banButton.setTextAlign(TextAnchor.MiddleCenter);
+            banButton.setBackgroundColor((int) 0x8B2D2DFFL);
+            banButton.setClickable(true);
+            row.addChild(banButton);
+            view.banTargetsByButtonId().put(banButton.getID(), connectedPlayer.getUID());
+        }
+    }
+
+    private void kickPlayerFromDashboard(Player administrator, String targetUid) {
+        if (!administrator.isAdmin() || administrator.getUID().equals(targetUid)) {
+            administrator.sendTextMessage("<color=#FF7777>You cannot kick that player.</color>");
+            return;
+        }
+        Player target = Server.getPlayerByUID(targetUid);
+        if (target == null) {
+            administrator.sendTextMessage("<color=#AAAAAA>That player is no longer connected.</color>");
+            return;
+        }
+        String targetName = target.getName();
+        target.kick("Kicked by administrator " + administrator.getName());
+        System.out.println("[RisingWorldStarter] " + administrator.getName() + " kicked " + targetName
+                + " (" + targetUid + ") from the admin dashboard");
+        executeDelayed(0.5f, () -> {
+            AdminView view = adminViews.get(administrator.getUID());
+            if (view != null) refreshAdminDashboard(view);
+        });
+    }
+
+    private void confirmBanFromDashboard(Player administrator, String targetUid) {
+        if (!administrator.isAdmin() || administrator.getUID().equals(targetUid)) {
+            administrator.sendTextMessage("<color=#FF7777>You cannot ban that player.</color>");
+            return;
+        }
+        Player target = Server.getPlayerByUID(targetUid);
+        if (target == null) {
+            administrator.sendTextMessage("<color=#AAAAAA>That player is no longer connected.</color>");
+            return;
+        }
+        String targetName = target.getName();
+        administrator.showMessageBox(MessageBoxButtons.Yes_No, "Confirm permanent ban",
+                "Ban " + targetName + " from this server?", -1, selectedButton -> {
+                    if (selectedButton == null || selectedButton != 0 || !administrator.isAdmin()) return;
+                    Player currentTarget = Server.getPlayerByUID(targetUid);
+                    if (currentTarget == null) {
+                        administrator.sendTextMessage("<color=#AAAAAA>That player is no longer connected.</color>");
+                        return;
+                    }
+                    currentTarget.ban("Banned by administrator " + administrator.getName());
+                    System.out.println("[RisingWorldStarter] " + administrator.getName() + " banned "
+                            + targetName + " (" + targetUid + ") from the admin dashboard");
+                    executeDelayed(0.5f, () -> {
+                        AdminView view = adminViews.get(administrator.getUID());
+                        if (view != null) refreshAdminDashboard(view);
+                    });
+                });
+    }
+
+    private void closeAdminDashboard(Player player) {
+        AdminView view = adminViews.remove(player.getUID());
+        if (view != null) {
+            player.removeUIElement(view.window());
+        }
+        player.setMouseCursorVisible(false);
+    }
+
     private void toggleStore(Player player) {
         if (storeViews.containsKey(player.getUID())) {
             closeStore(player);
         } else {
+            if (adminViews.containsKey(player.getUID())) {
+                closeAdminDashboard(player);
+            }
             openStore(player);
         }
     }
@@ -850,6 +1057,29 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     @EventMethod
     public void onStoreClick(PlayerUIElementClickEvent event) {
         Player player = event.getPlayer();
+        AdminView adminView = adminViews.get(player.getUID());
+        if (adminView != null) {
+            int adminElementId = event.getUIElement().getID();
+            if (adminElementId == adminView.closeButton().getID()) {
+                closeAdminDashboard(player);
+                return;
+            }
+            if (adminElementId == adminView.refreshButton().getID()) {
+                refreshAdminDashboard(adminView);
+                return;
+            }
+            String kickTarget = adminView.kickTargetsByButtonId().get(adminElementId);
+            if (kickTarget != null) {
+                kickPlayerFromDashboard(player, kickTarget);
+                return;
+            }
+            String banTarget = adminView.banTargetsByButtonId().get(adminElementId);
+            if (banTarget != null) {
+                confirmBanFromDashboard(player, banTarget);
+                return;
+            }
+        }
+
         StoreView view = storeViews.get(player.getUID());
         if (view == null) {
             return;
@@ -949,5 +1179,11 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     }
 
     private record CartLine(StoreCatalog.StoreItem item, int quantity) {
+    }
+
+    private record AdminView(UIElement window, UILabel closeButton, UILabel refreshButton,
+                             UILabel summary, UIScrollView playerList,
+                             Map<Integer, String> kickTargetsByButtonId,
+                             Map<Integer, String> banTargetsByButtonId) {
     }
 }
