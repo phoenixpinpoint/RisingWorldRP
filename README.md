@@ -70,10 +70,10 @@ claim-cost=10000.00
 base-salary=1000.00
 ```
 
-Every connected player receives the base salary when the in-world date changes
-at midnight. Payday detects the date change rather than requiring an exact
-midnight tick. It also listens for Rising World's night-skip event and checks
-again after sleepers wake, so sleeping through midnight cannot miss payday.
+Every connected player receives the base salary every eight in-world hours, at
+00:00, 08:00, and 16:00. Payday detects entry into a new eight-hour period rather
+than requiring an exact clock tick. It also checks again after Rising World
+skips the night, so sleeping through midnight cannot miss payday.
 Other plugins can access the API through the loaded plugin instance:
 
 ```java

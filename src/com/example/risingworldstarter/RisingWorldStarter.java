@@ -43,7 +43,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private ClaimAdminService claimAdmins;
     private EconomySettings economySettings;
     private Timer worldClockTimer;
-    private WorldDate lastSalaryDate;
+    private PayPeriod lastSalaryPeriod;
 
     @Override
     public void onEnable() {
@@ -52,7 +52,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         claimAdmins = new ClaimAdminService(Path.of(getPath(), "claim-admins.properties"));
         economySettings = EconomySettings.load(Path.of(getPath(), "economy.properties"));
         net.risingworld.api.objects.Time currentTime = Server.getGameTime();
-        lastSalaryDate = new WorldDate(currentTime.getYear(), currentTime.getMonth(), currentTime.getDay());
+        lastSalaryPeriod = PayPeriod.from(currentTime);
         registerEventListener(this);
         worldClockTimer = new Timer(1f, 0f, -1, this::updateWorldClockLabels);
         worldClockTimer.start();
@@ -65,7 +65,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
             worldClockTimer.kill();
             worldClockTimer = null;
         }
-        lastSalaryDate = null;
+        lastSalaryPeriod = null;
         balanceLabels.clear();
         worldTimeLabels.clear();
         claimVisuals.clear();
@@ -419,32 +419,33 @@ public final class RisingWorldStarter extends Plugin implements Listener {
 
     private void updateWorldClockLabels() {
         net.risingworld.api.objects.Time time = Server.getGameTime();
-        payDailySalaryWhenDateChanges(time);
+        paySalaryWhenPeriodChanges(time);
         for (UILabel label : worldTimeLabels.values()) {
             updateWorldClockLabel(label, time);
         }
     }
 
-    private void payDailySalaryWhenDateChanges(net.risingworld.api.objects.Time time) {
-        WorldDate currentDate = new WorldDate(time.getYear(), time.getMonth(), time.getDay());
-        if (lastSalaryDate == null) {
-            lastSalaryDate = currentDate;
+    private void paySalaryWhenPeriodChanges(net.risingworld.api.objects.Time time) {
+        PayPeriod currentPeriod = PayPeriod.from(time);
+        if (lastSalaryPeriod == null) {
+            lastSalaryPeriod = currentPeriod;
             return;
         }
-        if (currentDate.equals(lastSalaryDate)) {
+        if (currentPeriod.equals(lastSalaryPeriod)) {
             return;
         }
 
-        lastSalaryDate = currentDate;
+        lastSalaryPeriod = currentPeriod;
         long salary = economySettings.baseSalary();
         Player[] players = Server.getAllPlayers();
-        System.out.println("[RisingWorldStarter] Running daily payroll for " + players.length
-                + " connected player(s) on " + currentDate);
+        System.out.println("[RisingWorldStarter] Running 8-hour payroll for " + players.length
+                + " connected player(s) at " + currentPeriod.periodStartHour() + ":00 on "
+                + currentPeriod.year() + "-" + currentPeriod.month() + "-" + currentPeriod.day());
         for (Player player : players) {
             economy.createAccount(player.getUID(), economySettings.defaultBalance());
             long newBalance = economy.deposit(player.getUID(), salary);
             updateBalanceLabel(player);
-            player.sendTextMessage("<color=#77FF99>Daily salary paid:</color> " + formatBalance(salary));
+            player.sendTextMessage("<color=#77FF99>8-hour salary paid:</color> " + formatBalance(salary));
             System.out.println("[RisingWorldStarter] Paid " + player.getName() + " " + formatBalance(salary)
                     + "; new balance " + formatBalance(newBalance));
         }
@@ -460,6 +461,13 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         return currency.format(minorUnits / 100.0);
     }
 
-    private record WorldDate(int year, int month, int day) {
+    private record PayPeriod(int year, int month, int day, int period) {
+        private static PayPeriod from(net.risingworld.api.objects.Time time) {
+            return new PayPeriod(time.getYear(), time.getMonth(), time.getDay(), time.getHours() / 8);
+        }
+
+        private int periodStartHour() {
+            return period * 8;
+        }
     }
 }
