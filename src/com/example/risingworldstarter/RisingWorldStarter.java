@@ -2,6 +2,7 @@ package com.example.risingworldstarter;
 
 import net.risingworld.api.Plugin;
 import net.risingworld.api.Server;
+import net.risingworld.api.Timer;
 import net.risingworld.api.events.EventMethod;
 import net.risingworld.api.events.Listener;
 import net.risingworld.api.events.player.PlayerCommandEvent;
@@ -32,6 +33,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class RisingWorldStarter extends Plugin implements Listener {
     private final Map<String, UILabel> balanceLabels = new ConcurrentHashMap<>();
+    private final Map<String, UILabel> worldTimeLabels = new ConcurrentHashMap<>();
     private final Map<String, List<Area3D>> claimVisuals = new ConcurrentHashMap<>();
     private final Map<String, String> visualModes = new ConcurrentHashMap<>();
     private final Map<String, Float> visualHeights = new ConcurrentHashMap<>();
@@ -39,6 +41,8 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private ClaimService claims;
     private ClaimAdminService claimAdmins;
     private EconomySettings economySettings;
+    private Timer worldClockTimer;
+    private WorldDate lastSalaryDate;
 
     @Override
     public void onEnable() {
@@ -46,13 +50,21 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         claims = new ClaimService(Path.of(getPath(), "claims.properties"));
         claimAdmins = new ClaimAdminService(Path.of(getPath(), "claim-admins.properties"));
         economySettings = EconomySettings.load(Path.of(getPath(), "economy.properties"));
+        lastSalaryDate = null;
         registerEventListener(this);
+        worldClockTimer = new Timer(1f, 0f, -1, this::updateWorldClockLabels);
+        worldClockTimer.start();
         System.out.println("[RisingWorldStarter] Enabled on Rising World " + getGameVersion());
     }
 
     @Override
     public void onDisable() {
+        if (worldClockTimer != null) {
+            worldClockTimer.kill();
+            worldClockTimer = null;
+        }
         balanceLabels.clear();
+        worldTimeLabels.clear();
         claimVisuals.clear();
         visualModes.clear();
         visualHeights.clear();
@@ -71,11 +83,13 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     public void onPlayerSpawn(PlayerSpawnEvent event) {
         economy.createAccount(event.getPlayer().getUID(), economySettings.defaultBalance());
         showBalance(event.getPlayer());
+        showWorldClock(event.getPlayer());
     }
 
     @EventMethod
     public void onPlayerDisconnect(PlayerDisconnectEvent event) {
         balanceLabels.remove(event.getPlayer().getUID());
+        worldTimeLabels.remove(event.getPlayer().getUID());
         claimVisuals.remove(event.getPlayer().getUID());
         visualModes.remove(event.getPlayer().getUID());
         visualHeights.remove(event.getPlayer().getUID());
@@ -372,8 +386,64 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         player.addUIElement(label);
     }
 
+    private void showWorldClock(Player player) {
+        UILabel oldLabel = worldTimeLabels.remove(player.getUID());
+        if (oldLabel != null) {
+            player.removeUIElement(oldLabel);
+        }
+
+        UILabel label = new UILabel();
+        label.setTextAlign(TextAnchor.MiddleCenter);
+        label.setFontSize(20f);
+        label.setFontColor((int) 0xF4E3A1FFL);
+        label.setPosition(50f, 0.5f, true);
+        label.setPivot(Pivot.UpperCenter);
+        label.setSize(460f, 42f, false);
+
+        worldTimeLabels.put(player.getUID(), label);
+        updateWorldClockLabel(label, Server.getGameTime());
+        player.addUIElement(label);
+    }
+
+    private void updateWorldClockLabels() {
+        net.risingworld.api.objects.Time time = Server.getGameTime();
+        payDailySalaryWhenDateChanges(time);
+        for (UILabel label : worldTimeLabels.values()) {
+            updateWorldClockLabel(label, time);
+        }
+        lastSalaryDate = null;
+    }
+
+    private void payDailySalaryWhenDateChanges(net.risingworld.api.objects.Time time) {
+        WorldDate currentDate = new WorldDate(time.getYear(), time.getMonth(), time.getDay());
+        if (lastSalaryDate == null) {
+            lastSalaryDate = currentDate;
+            return;
+        }
+        if (currentDate.equals(lastSalaryDate)) {
+            return;
+        }
+
+        lastSalaryDate = currentDate;
+        long salary = economySettings.baseSalary();
+        for (Player player : Server.getAllPlayers()) {
+            economy.createAccount(player.getUID(), economySettings.defaultBalance());
+            economy.deposit(player.getUID(), salary);
+            updateBalanceLabel(player);
+            player.sendTextMessage("<color=#77FF99>Daily salary paid:</color> " + formatBalance(salary));
+        }
+    }
+
+    private static void updateWorldClockLabel(UILabel label, net.risingworld.api.objects.Time time) {
+        label.setText(String.format(Locale.US, "Year %d  •  Month %d  •  Day %d     %02d:%02d",
+                time.getYear(), time.getMonth(), time.getDay(), time.getHours(), time.getMinutes()));
+    }
+
     private static String formatBalance(long minorUnits) {
         NumberFormat currency = NumberFormat.getCurrencyInstance(Locale.US);
         return currency.format(minorUnits / 100.0);
+    }
+
+    private record WorldDate(int year, int month, int day) {
     }
 }

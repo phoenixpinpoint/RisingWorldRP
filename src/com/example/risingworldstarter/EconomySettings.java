@@ -9,9 +9,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
 
-record EconomySettings(long defaultBalance, long claimCost) {
+record EconomySettings(long defaultBalance, long claimCost, long baseSalary) {
     private static final String DEFAULT_BALANCE = "25000.00";
     private static final String CLAIM_COST = "10000.00";
+    private static final String BASE_SALARY = "1000.00";
 
     static EconomySettings load(Path path) {
         Properties properties = new Properties();
@@ -24,6 +25,7 @@ record EconomySettings(long defaultBalance, long claimCost) {
         } else {
             properties.setProperty("default-balance", DEFAULT_BALANCE);
             properties.setProperty("claim-cost", CLAIM_COST);
+            properties.setProperty("base-salary", BASE_SALARY);
             try {
                 Files.createDirectories(path.getParent());
                 try (OutputStream output = Files.newOutputStream(path)) {
@@ -36,7 +38,8 @@ record EconomySettings(long defaultBalance, long claimCost) {
 
         return new EconomySettings(
                 toMinorUnits(properties.getProperty("default-balance", DEFAULT_BALANCE), "default-balance"),
-                toMinorUnits(properties.getProperty("claim-cost", CLAIM_COST), "claim-cost"));
+                toMinorUnits(properties.getProperty("claim-cost", CLAIM_COST), "claim-cost"),
+                toMinorUnits(properties.getProperty("base-salary", BASE_SALARY), "base-salary"));
     }
 
     private static long toMinorUnits(String value, String settingName) {

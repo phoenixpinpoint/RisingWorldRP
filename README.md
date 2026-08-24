@@ -55,6 +55,9 @@ Restart the game/server. Its console/log should report `[RisingWorldStarter] Ena
 Players see their current balance on the HUD after spawning. They can also use
 `/balance` or `/bal` in chat to print the balance and refresh the HUD.
 
+The top-center HUD shows the current in-world year, month, day, and 24-hour
+clock. It follows the server's world calendar and refreshes once per second.
+
 Balances are stored as integer minor units (cents) in
 `Plugins/RisingWorldStarter/balances.properties`. New players start with
 `$25,000.00`, and claiming a chunk costs `$10,000.00`.
@@ -64,7 +67,12 @@ Both values can be changed in the generated `economy.properties` file:
 ```properties
 default-balance=25000.00
 claim-cost=10000.00
+base-salary=1000.00
 ```
+
+Every connected player receives the base salary when the in-world date changes
+at midnight. Payday detects the date change rather than requiring an exact
+midnight tick, so players are still paid when sleeping skips past midnight.
 Other plugins can access the API through the loaded plugin instance:
 
 ```java
