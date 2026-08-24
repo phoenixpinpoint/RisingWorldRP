@@ -46,6 +46,14 @@ final class ClaimService {
         return claims.size();
     }
 
+    synchronized int deleteClaimsByOwner(String ownerUid) {
+        int oldSize = claims.size();
+        claims.entrySet().removeIf(entry -> entry.getValue().ownerUid().equals(ownerUid));
+        int removed = oldSize - claims.size();
+        if (removed > 0) save();
+        return removed;
+    }
+
     synchronized void migrateOwner(String oldOwnerUid, String newOwnerUid, String newOwnerName) {
         boolean changed = false;
         for (Map.Entry<String, Claim> entry : claims.entrySet()) {
@@ -94,10 +102,16 @@ final class ClaimService {
         try (InputStream input = Files.newInputStream(dataFile)) {
             properties.load(input);
             for (String chunkKey : properties.stringPropertyNames()) {
-                String[] value = properties.getProperty(chunkKey).split(":", 2);
-                if (value.length == 2) {
-                    String name = new String(Base64.getUrlDecoder().decode(value[1]), StandardCharsets.UTF_8);
-                    claims.put(chunkKey, new Claim(value[0], name));
+                String value = properties.getProperty(chunkKey);
+                // The owner identifier may itself contain ':' (character UUIDs
+                // use the "character:<uuid>" namespace). The final colon is
+                // the stable separator before the Base64-encoded owner name.
+                int separator = value.lastIndexOf(':');
+                if (separator > 0 && separator + 1 < value.length()) {
+                    String ownerUid = value.substring(0, separator);
+                    String encodedName = value.substring(separator + 1);
+                    String name = new String(Base64.getUrlDecoder().decode(encodedName), StandardCharsets.UTF_8);
+                    claims.put(chunkKey, new Claim(ownerUid, name));
                 }
             }
         } catch (IOException | IllegalArgumentException exception) {

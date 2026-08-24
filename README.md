@@ -56,9 +56,11 @@ templates from `config/` into the plugin directory, run:
 ./gradlew installConfig -PrisingWorldPath="/path/to/Rising World"
 ```
 
-`installConfig` may overwrite existing `economy.properties` and
-`marketplace.json`, so use it only when you intend to load the project's
-configuration. On Windows, use `gradlew.bat`.
+`installConfig` may overwrite the root `plugin.properties`,
+`economy.properties`, and `marketplace.json` templates, so use it only when you
+intend to update the defaults used by newly initialized worlds. Existing
+world-specific configuration is never overwritten. On Windows, use
+`gradlew.bat`.
 
 Restart the game/server. Its console/log should report `[RisingWorldStarter] Enabled ...`.
 Startup also writes `[RisingWorldStarter/DEBUG]` diagnostics showing the resolved
@@ -81,7 +83,7 @@ The top-center HUD shows the current in-world year, month, day, and 24-hour
 clock. It follows the server's world calendar and refreshes once per second.
 
 Balances are stored as integer minor units (cents) in
-`Plugins/RisingWorldStarter/balances.properties`. New players start with
+`Worlds/<world>/plugins/RisingWorldStarter/balances.properties`. New players start with
 `$25,000.00`, and claiming a chunk costs `$10,000.00`.
 
 These values can be changed in `config/economy.properties` before explicitly
@@ -116,11 +118,23 @@ Every Rising World UID owns up to four character slots. On spawn, the player
 must select an existing character or create one in an empty slot. The selected
 character name becomes the visible in-game player name.
 
+Use `/characters` (or `/character` or `/chars`) at any time to save the active
+character and reopen the slot selector without disconnecting from the server.
+Each occupied slot also has a Delete button with a confirmation dialog. Deleting
+a character permanently removes its saved state, inventory, balance, and claims.
+Character appearance comes from Rising World's native profile editor. Edit the
+profile outside the world, then join the server; the plugin captures that native
+appearance before loading a roleplay character. New characters inherit it. Use
+`/syncappearance` to apply the most recently captured native profile appearance
+to the active character. Rejoin after changing the native profile so the plugin
+can capture the new values, including facial features not writable through the
+live server API.
+
 On first use, the plugin creates slot 1 as a legacy character before changing
 the player. It captures the existing name, inventory, clothing, appearance,
 position, rotation, health, hunger, thirst, stamina, balance, and claims.
 Character-controlled data is stored beneath
-`Plugins/RisingWorldStarter/characters/` and autosaved every 60 seconds as well
+`Worlds/<world>/plugins/RisingWorldStarter/characters/` and autosaved every 60 seconds as well
 as on disconnect and plugin shutdown.
 
 Balances, salary, claims, inventory, appearance, status, position, and future
@@ -180,7 +194,7 @@ the plugin imports it once and writes the equivalent JSON file.
 ## Land claims
 
 Land ownership is stored by horizontal chunk in
-`Plugins/RisingWorldStarter/claims.properties`. Available chat commands:
+`Worlds/<world>/plugins/RisingWorldStarter/claims.properties`. Available chat commands:
 
 - `/claim` claims the chunk where you are standing.
 - `/chunk` reports the current chunk coordinates and owner, and draws its boundary.
@@ -200,7 +214,24 @@ Server administrators can manage a persistent claim-administrator whitelist:
 - `/claimadmin list`
 
 Whitelisted claim administrators can use `/unclaim` on anyone's chunk. The list
-is stored by player UID in `claim-admins.properties`.
+is stored by player UID in the world-scoped `claim-admins.properties`.
+
+## World and server isolation
+
+Characters, inventories, balances, claims, and administrator assignments are
+isolated by Rising World's own world directory. Starting another world or
+server uses its separate `Worlds/<world>/plugins/RisingWorldStarter/`
+directory, preventing characters and inventories from crossing between worlds. On the first launch after upgrading, legacy
+global data is copied into the currently loaded world once; the original files
+remain in place as a recovery backup.
+
+Each enabled world directory contains its own `plugin.properties`,
+`economy.properties`, and `marketplace.json`. A world must explicitly contain
+`Worlds/<world>/plugins/RisingWorldStarter/plugin.properties` or the plugin does
+nothing for that world. When the opt-in file exists, root economy and marketplace
+copies are used as templates for any missing world configuration. Set
+`enabled=false` to temporarily disable an opted-in world without removing the
+file or JAR.
 
 ## Project layout
 

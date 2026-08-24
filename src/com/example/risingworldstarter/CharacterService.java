@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
@@ -50,6 +51,33 @@ final class CharacterService {
         return legacy;
     }
 
+    void captureProfileAppearance(Player player) {
+        Properties account = loadProperties(accountFile(player.getUID()));
+        Skin skin = player.getSkin();
+        account.setProperty("profile-skin.gender", skin.getGender().name());
+        account.setProperty("profile-skin.color", Integer.toString(skin.getSkinColor()));
+        account.setProperty("profile-skin.hair-color", Integer.toString(skin.getHairColor()));
+        account.setProperty("profile-skin.eye-color", Integer.toString(skin.getEyeColor()));
+        account.setProperty("profile-skin.hairstyle", Byte.toString(skin.getHairstyle()));
+        account.setProperty("profile-skin.beard", Byte.toString(skin.getBeard()));
+        account.setProperty("profile-skin.variation", Byte.toString(skin.getVariation()));
+        saveProperties(accountFile(player.getUID()), account);
+    }
+
+    boolean applyProfileAppearance(Player player) {
+        Properties account = loadProperties(accountFile(player.getUID()));
+        if (!account.containsKey("profile-skin.gender")) return false;
+        Skin skin = player.getSkin();
+        skin.setGender(Skin.Gender.valueOf(account.getProperty("profile-skin.gender")));
+        skin.setSkinColor(Integer.parseInt(account.getProperty("profile-skin.color")));
+        skin.setHairColor(Integer.parseInt(account.getProperty("profile-skin.hair-color")));
+        skin.setEyeColor(Integer.parseInt(account.getProperty("profile-skin.eye-color")));
+        skin.setHairstyle(Byte.parseByte(account.getProperty("profile-skin.hairstyle")));
+        skin.setBeard(Byte.parseByte(account.getProperty("profile-skin.beard")));
+        skin.setVariation(Byte.parseByte(account.getProperty("profile-skin.variation")));
+        return true;
+    }
+
     CharacterSummary createCharacter(Player player, String requestedName, int slot) {
         String name = requireCharacterName(requestedName);
         List<CharacterSummary> existing = getCharacters(player.getUID());
@@ -65,17 +93,48 @@ final class CharacterService {
         }
         String profileName = existing.isEmpty() ? player.getName() : existing.get(0).profileName();
         CharacterSummary created = createSummary(player.getUID(), profileName, name, slot);
-        resetPlayerForNewCharacter(player, name);
-        saveCharacter(player, created);
+        Vector3f spawn = resetPlayerForNewCharacter(player, name);
+        // setPosition() is synchronized with the game asynchronously. Persist
+        // the known spawn coordinates explicitly instead of immediately reading
+        // player.getPosition(), which may still contain the previous character's
+        // location at this point.
+        saveCharacter(player, created, spawn, Quaternion.IDENTITY);
         return created;
     }
 
+    void deleteCharacter(String accountUid, CharacterSummary character) {
+        Properties account = loadProperties(accountFile(accountUid));
+        String slotPrefix = "slot." + character.slot() + ".";
+        if (!character.id().equals(account.getProperty(slotPrefix + "id"))) {
+            throw new IllegalStateException("That character slot has changed; reopen the character menu");
+        }
+
+        Path directory = characterDirectory(accountUid, character.id());
+        if (Files.exists(directory)) {
+            try (var paths = Files.walk(directory)) {
+                for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+                    Files.deleteIfExists(path);
+                }
+            } catch (IOException exception) {
+                throw new IllegalStateException("Could not delete character " + character.name(), exception);
+            }
+        }
+        account.remove(slotPrefix + "id");
+        account.remove(slotPrefix + "name");
+        saveProperties(accountFile(accountUid), account);
+    }
+
     void saveCharacter(Player player, CharacterSummary character) {
+        saveCharacter(player, character, null, null);
+    }
+
+    private void saveCharacter(Player player, CharacterSummary character,
+                               Vector3f positionOverride, Quaternion rotationOverride) {
         Path directory = characterDirectory(player.getUID(), character.id());
         Properties state = new Properties();
         state.setProperty("name", character.name());
-        Vector3f position = player.getPosition();
-        Quaternion rotation = player.getRotation();
+        Vector3f position = positionOverride == null ? player.getPosition() : positionOverride;
+        Quaternion rotation = rotationOverride == null ? player.getRotation() : rotationOverride;
         state.setProperty("position", position.x + "," + position.y + "," + position.z);
         state.setProperty("rotation", rotation.x + "," + rotation.y + "," + rotation.z + "," + rotation.w);
         Skin skin = player.getSkin();
@@ -153,19 +212,15 @@ final class CharacterService {
         return new CharacterSummary(slot, id, characterName, profileName);
     }
 
-    private static void resetPlayerForNewCharacter(Player player, String characterName) {
+    private Vector3f resetPlayerForNewCharacter(Player player, String characterName) {
         player.setName(characterName);
         player.getInventory().clear();
         player.getInventory().syncWithClient();
         player.getClothes().removeAll();
-        Skin skin = player.getSkin();
-        skin.setGender(Skin.Gender.Male);
-        skin.setSkinColor(0);
-        skin.setHairColor(0);
-        skin.setEyeColor(0);
-        skin.setHairstyle((byte) 0);
-        skin.setBeard((byte) 0);
-        skin.setVariation((byte) 0);
+        // New characters inherit the full appearance captured from Rising
+        // World's native profile editor, including facial variation values the
+        // server API cannot set interactively in a dependable way.
+        applyProfileAppearance(player);
         player.setHealth(player.getMaxHealth());
         player.setHunger(100);
         player.setThirst(100);
@@ -175,6 +230,7 @@ final class CharacterService {
         Vector3f spawn = Server.getDefaultSpawnPosition();
         player.setPosition(spawn);
         player.setRotation(Quaternion.IDENTITY);
+        return spawn;
     }
 
     private Path accountDirectory(String uid) {

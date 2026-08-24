@@ -19,11 +19,13 @@ import net.risingworld.api.definitions.Items;
 import net.risingworld.api.objects.Player;
 import net.risingworld.api.objects.Area;
 import net.risingworld.api.objects.Item;
+import net.risingworld.api.objects.Skin;
 import net.risingworld.api.ui.UIElement;
 import net.risingworld.api.ui.UILabel;
 import net.risingworld.api.ui.MessageBoxButtons;
 import net.risingworld.api.ui.UIScrollView;
 import net.risingworld.api.ui.UITextField;
+import net.risingworld.api.ui.UITarget;
 import net.risingworld.api.ui.style.Pivot;
 import net.risingworld.api.ui.style.ScaleMode;
 import net.risingworld.api.ui.style.TextAnchor;
@@ -33,18 +35,42 @@ import net.risingworld.api.utils.Vector3i;
 import net.risingworld.api.worldelements.Area3D;
 import net.risingworld.api.worldelements.GameObject;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.text.NumberFormat;
 import java.util.Locale;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Minimal entry point for a Rising World (Unity version) plugin.
  */
 public final class RisingWorldStarter extends Plugin implements Listener {
+    private static final int[] SKIN_COLORS = {
+            0xF1C27D, 0xE0AC69, 0xC68642, 0xA66A3F, 0x8D5524, 0x5C3317
+    };
+    private static final int[] HAIR_COLORS = {
+            0x17120F, 0x3B2417, 0x6B4423, 0xA56B46, 0xD8B46A, 0xB9B9B9, 0x7A1F16
+    };
+    private static final int[] EYE_COLORS = {
+            0x2B1B12, 0x634E34, 0x3D6B3D, 0x3F6F8F, 0x7289A3, 0x58456B
+    };
+    private static final int[] MALE_HAIRSTYLES = {
+            0, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68
+    };
+    private static final int[] FEMALE_HAIRSTYLES = {
+            0, 100, 102, 103, 104, 105, 106, 107, 108, 109, 110,
+            111, 112, 113, 114, 115, 116, 117, 118, 119
+    };
+    private static final int[] BEARDS = {
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30
+    };
     private final Map<String, UILabel> balanceLabels = new ConcurrentHashMap<>();
     private final Map<String, UILabel> worldTimeLabels = new ConcurrentHashMap<>();
     private final Map<String, List<Area3D>> claimVisuals = new ConcurrentHashMap<>();
@@ -54,6 +80,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private final Map<String, AdminView> adminViews = new ConcurrentHashMap<>();
     private final Map<String, CharacterService.CharacterSummary> activeCharacters = new ConcurrentHashMap<>();
     private final Map<String, CharacterSelectionView> characterSelectionViews = new ConcurrentHashMap<>();
+    private final Map<String, AppearanceView> appearanceViews = new ConcurrentHashMap<>();
     private EconomyApi economy;
     private ClaimService claims;
     private ClaimAdminService claimAdmins;
@@ -72,16 +99,26 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         debug("Starting plugin initialization");
         debug("Plugin data directory: " + pluginPath);
 
-        economy = new FileEconomyService(pluginPath.resolve("balances.properties"));
+        Path worldDataPath = World.getWorldFolder().toPath().toAbsolutePath().normalize()
+                .resolve("plugins").resolve("RisingWorldStarter");
+        debug("World-scoped data directory: " + worldDataPath);
+        if (!isEnabledForWorld(worldDataPath.resolve("plugin.properties"))) {
+            System.out.println("[RisingWorldStarter] Not enabled for world " + World.getName()
+                    + ": create " + worldDataPath.resolve("plugin.properties") + " to opt in");
+            return;
+        }
+        prepareWorldDataDirectory(pluginPath, worldDataPath);
+
+        economy = new FileEconomyService(worldDataPath.resolve("balances.properties"));
         debug("Economy balances loaded");
-        claims = new ClaimService(pluginPath.resolve("claims.properties"));
+        claims = new ClaimService(worldDataPath.resolve("claims.properties"));
         debug("Land claims loaded");
-        claimAdmins = new ClaimAdminService(pluginPath.resolve("claim-admins.properties"));
+        claimAdmins = new ClaimAdminService(worldDataPath.resolve("claim-admins.properties"));
         debug("Claim administrators loaded: " + claimAdmins.getAll().size());
-        characterService = new CharacterService(pluginPath.resolve("characters"));
+        characterService = new CharacterService(worldDataPath.resolve("characters"));
         debug("Character service loaded with four slots per account");
 
-        Path economyConfigPath = pluginPath.resolve("economy.properties");
+        Path economyConfigPath = worldDataPath.resolve("economy.properties");
         economySettings = EconomySettings.load(economyConfigPath);
         debug("Economy config loaded from " + economyConfigPath);
         debug("Economy values: starting cash=" + formatBalance(economySettings.defaultBalance())
@@ -92,7 +129,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         // hosted world is starting. Loading them here can terminate the game
         // process without a Java exception. Defer catalog creation until the
         // first player has spawned, when the definition registry is available.
-        marketplaceConfigPath = pluginPath.resolve("marketplace.json");
+        marketplaceConfigPath = worldDataPath.resolve("marketplace.json");
         storeCatalog = StoreCatalog.empty();
         storeCatalogLoaded = false;
         debug("Marketplace config queued for world-ready loading from " + marketplaceConfigPath);
@@ -117,8 +154,78 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         characterAutosaveTimer = new Timer(60f, 60f, -1, this::saveActiveCharacters);
         characterAutosaveTimer.start();
         debug("World clock and payroll timer started; payroll runs at 00:00, 08:00, and 16:00");
-        debug("Commands registered: /balance, /bal, /store, /admin, /claim, /unclaim, /chunk, /claims, /claimadmin");
+        debug("Commands registered: /characters, /syncappearance, /balance, /bal, /store, /admin, /claim, /unclaim, /chunk, /claims, /claimadmin");
         System.out.println("[RisingWorldStarter] Enabled on Rising World " + getGameVersion());
+    }
+
+    private void prepareWorldDataDirectory(Path pluginPath, Path worldDataPath) {
+        Path worldFolder = World.getWorldFolder().toPath().toAbsolutePath().normalize();
+
+        try {
+            Files.createDirectories(worldDataPath);
+            copyLegacyFile(pluginPath.resolve("economy.properties"),
+                    worldDataPath.resolve("economy.properties"));
+            copyLegacyFile(pluginPath.resolve("marketplace.json"),
+                    worldDataPath.resolve("marketplace.json"));
+            Path worldMigrationMarker = worldDataPath.resolve("migration.complete");
+            if (!Files.exists(worldMigrationMarker)) {
+                boolean hasFilesInWorldRoot = Files.exists(worldFolder.resolve("balances.properties"))
+                        || Files.exists(worldFolder.resolve("claims.properties"))
+                        || Files.isDirectory(worldFolder.resolve("characters"));
+                Path legacySource = hasFilesInWorldRoot ? worldFolder : pluginPath;
+                Path globalMigrationMarker = pluginPath.resolve("legacy-data-world.txt");
+                boolean mayImportGlobalData = hasFilesInWorldRoot || !Files.exists(globalMigrationMarker);
+                if (mayImportGlobalData) {
+                    copyLegacyFile(legacySource.resolve("balances.properties"),
+                        worldDataPath.resolve("balances.properties"));
+                    copyLegacyFile(legacySource.resolve("claims.properties"),
+                        worldDataPath.resolve("claims.properties"));
+                    copyLegacyFile(legacySource.resolve("claim-admins.properties"),
+                        worldDataPath.resolve("claim-admins.properties"));
+                    copyLegacyDirectory(legacySource.resolve("characters"),
+                        worldDataPath.resolve("characters"));
+                    if (!hasFilesInWorldRoot) {
+                        Files.writeString(globalMigrationMarker, World.getName() + System.lineSeparator(),
+                                StandardCharsets.UTF_8);
+                    }
+                    debug("Migrated existing data from " + legacySource
+                            + "; original files retained as backup");
+                }
+                Files.writeString(worldMigrationMarker, "complete" + System.lineSeparator(),
+                        StandardCharsets.UTF_8);
+            }
+        } catch (IOException exception) {
+            throw new IllegalStateException("Could not initialize world-scoped plugin data", exception);
+        }
+    }
+
+    private static boolean isEnabledForWorld(Path configPath) {
+        if (!Files.exists(configPath)) return false;
+        Properties properties = new Properties();
+        try (var input = Files.newInputStream(configPath)) {
+            properties.load(input);
+            return Boolean.parseBoolean(properties.getProperty("enabled", "true"));
+        } catch (IOException exception) {
+            throw new IllegalStateException("Could not load world plugin settings from " + configPath, exception);
+        }
+    }
+
+    private static void copyLegacyFile(Path source, Path destination) throws IOException {
+        if (Files.exists(source) && !Files.exists(destination)) {
+            Files.createDirectories(destination.getParent());
+            Files.copy(source, destination, StandardCopyOption.COPY_ATTRIBUTES);
+        }
+    }
+
+    private static void copyLegacyDirectory(Path source, Path destination) throws IOException {
+        if (!Files.isDirectory(source) || Files.exists(destination)) return;
+        try (var paths = Files.walk(source)) {
+            for (Path sourcePath : paths.toList()) {
+                Path targetPath = destination.resolve(source.relativize(sourcePath));
+                if (Files.isDirectory(sourcePath)) Files.createDirectories(targetPath);
+                else Files.copy(sourcePath, targetPath, StandardCopyOption.COPY_ATTRIBUTES);
+            }
+        }
     }
 
     @Override
@@ -140,6 +247,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         adminViews.clear();
         activeCharacters.clear();
         characterSelectionViews.clear();
+        appearanceViews.clear();
         storeCatalogLoaded = false;
         System.out.println("[RisingWorldStarter] Disabled");
     }
@@ -159,6 +267,10 @@ public final class RisingWorldStarter extends Plugin implements Listener {
 
     @EventMethod
     public void onPlayerSpawn(PlayerSpawnEvent event) {
+        if (!activeCharacters.containsKey(event.getPlayer().getUID())) {
+            characterService.captureProfileAppearance(event.getPlayer());
+            debug("Captured native profile appearance for " + event.getPlayer().getUID());
+        }
         initializeStoreCatalog();
         Player player = event.getPlayer();
         debug("Player spawned; scheduling character initialization for " + player.getName());
@@ -207,6 +319,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         storeViews.remove(event.getPlayer().getUID());
         adminViews.remove(event.getPlayer().getUID());
         characterSelectionViews.remove(event.getPlayer().getUID());
+        appearanceViews.remove(event.getPlayer().getUID());
     }
 
     @EventMethod
@@ -252,7 +365,14 @@ public final class RisingWorldStarter extends Plugin implements Listener {
             event.getPlayer().sendTextMessage("<color=#FFAA66>Select or create a character first.</color>");
             return;
         }
-        if (command.equalsIgnoreCase("/balance") || command.equalsIgnoreCase("/bal")) {
+        if (command.equalsIgnoreCase("/characters") || command.equalsIgnoreCase("/character")
+                || command.equalsIgnoreCase("/chars")) {
+            event.setCancelled(true);
+            openCharacterSwitcher(event.getPlayer());
+        } else if (command.equalsIgnoreCase("/syncappearance")) {
+            event.setCancelled(true);
+            syncProfileAppearance(event.getPlayer());
+        } else if (command.equalsIgnoreCase("/balance") || command.equalsIgnoreCase("/bal")) {
             event.setCancelled(true);
             Player player = event.getPlayer();
             String formattedBalance = formatBalance(economy.getBalance(characterKey(player)));
@@ -492,6 +612,24 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         return player.isAdmin() || claimAdmins.contains(player.getUID());
     }
 
+    private void openCharacterSwitcher(Player player) {
+        CharacterService.CharacterSummary active = activeCharacters.get(player.getUID());
+        if (active == null) {
+            showCharacterSelection(player);
+            return;
+        }
+
+        // Persist the current character before another slot can replace the
+        // player's inventory, appearance, status, and location.
+        characterService.saveCharacter(player, active);
+        if (storeViews.containsKey(player.getUID())) closeStore(player);
+        if (adminViews.containsKey(player.getUID())) closeAdminDashboard(player);
+        clearClaimVisuals(player);
+        showCharacterSelection(player);
+        player.sendTextMessage("<color=#E8C547>Choose a character to switch without leaving the server.</color>");
+        debug("Saved " + active.name() + " and opened the character switcher for " + player.getUID());
+    }
+
     private void showCharacterSelection(Player player) {
         CharacterSelectionView oldView = characterSelectionViews.remove(player.getUID());
         if (oldView != null) player.removeUIElement(oldView.window());
@@ -513,7 +651,18 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         title.setTextAlign(TextAnchor.MiddleCenter);
         window.addChild(title);
 
+        UILabel closeButton = new UILabel("X");
+        closeButton.setPosition(512f, 14f, false);
+        closeButton.setSize(28f, 28f, false);
+        closeButton.setFontSize(18f);
+        closeButton.setFontColor((int) 0xFFFFFFFFL);
+        closeButton.setTextAlign(TextAnchor.MiddleCenter);
+        closeButton.setBackgroundColor((int) 0x8B2E35FFL);
+        closeButton.setClickable(true);
+        window.addChild(closeButton);
+
         Map<Integer, CharacterService.CharacterSummary> charactersByButtonId = new ConcurrentHashMap<>();
+        Map<Integer, CharacterService.CharacterSummary> deleteByButtonId = new ConcurrentHashMap<>();
         Map<Integer, Integer> createSlotsByButtonId = new ConcurrentHashMap<>();
         Map<Integer, CharacterService.CharacterSummary> bySlot = new ConcurrentHashMap<>();
         characterService.getCharacters(player.getUID()).forEach(character -> bySlot.put(character.slot(), character));
@@ -523,7 +672,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                     ? "Slot " + slot + "\nCreate New Character"
                     : "Slot " + slot + "\n" + character.name());
             slotButton.setPosition(40f, 78f + (slot - 1) * 78f, false);
-            slotButton.setSize(480f, 64f, false);
+            slotButton.setSize(character == null ? 480f : 374f, 64f, false);
             slotButton.setFontSize(19f);
             slotButton.setFontColor((int) 0xFFFFFFFFL);
             slotButton.setTextAlign(TextAnchor.MiddleCenter);
@@ -534,11 +683,26 @@ public final class RisingWorldStarter extends Plugin implements Listener {
             slotButton.setClickable(true);
             window.addChild(slotButton);
             if (character == null) createSlotsByButtonId.put(slotButton.getID(), slot);
-            else charactersByButtonId.put(slotButton.getID(), character);
+            else {
+                charactersByButtonId.put(slotButton.getID(), character);
+                UILabel deleteButton = new UILabel("Delete");
+                deleteButton.setPosition(426f, 78f + (slot - 1) * 78f, false);
+                deleteButton.setSize(94f, 64f, false);
+                deleteButton.setFontSize(17f);
+                deleteButton.setFontColor((int) 0xFFFFFFFFL);
+                deleteButton.setTextAlign(TextAnchor.MiddleCenter);
+                deleteButton.setBackgroundColor((int) 0x8B2E35FFL);
+                deleteButton.setBorder(1f);
+                deleteButton.setBorderColor((int) 0xE06C75FFL);
+                deleteButton.setBorderEdgeRadius(5f, false);
+                deleteButton.setClickable(true);
+                window.addChild(deleteButton);
+                deleteByButtonId.put(deleteButton.getID(), character);
+            }
         }
 
         CharacterSelectionView view = new CharacterSelectionView(window, charactersByButtonId,
-                createSlotsByButtonId);
+                createSlotsByButtonId, deleteByButtonId, closeButton);
         characterSelectionViews.put(player.getUID(), view);
         player.addUIElement(window);
         player.stopInput(true, true);
@@ -552,8 +716,223 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                     try {
                         CharacterService.CharacterSummary character = characterService.createCharacter(player, name, slot);
                         activateCharacter(player, character);
+                        player.sendTextMessage("<color=#E8C547>Appearance synced from your Rising World profile.</color>");
                     } catch (IllegalArgumentException | IllegalStateException exception) {
                         player.showErrorMessageBox("Character creation failed", exception.getMessage());
+                    }
+                });
+    }
+
+    private void syncProfileAppearance(Player player) {
+        if (!characterService.applyProfileAppearance(player)) {
+            player.sendTextMessage("<color=#FFAA66>No native profile appearance has been captured. Rejoin the server and try again.</color>");
+            return;
+        }
+        CharacterService.CharacterSummary active = activeCharacters.get(player.getUID());
+        if (active != null) characterService.saveCharacter(player, active);
+        player.sendTextMessage("<color=#77FF99>Active character appearance synced from your Rising World profile.</color>");
+        debug("Synced native profile appearance to " + player.getUID());
+    }
+
+    private void showAppearanceEditor(Player player) {
+        AppearanceView oldView = appearanceViews.remove(player.getUID());
+        if (oldView != null) player.removeUIElement(oldView.window());
+
+        UIElement window = new UIElement();
+        // Keep the controls on the right so Rising World's native inventory
+        // character render remains visible on the left.
+        window.setPosition(99f, 50f, true);
+        window.setPivot(Pivot.MiddleRight);
+        window.setSize(620f, 430f, false);
+        window.setBackgroundColor((int) 0x161B22F8L);
+        window.setBorder(2f);
+        window.setBorderColor((int) 0xE8C547FFL);
+        window.setBorderEdgeRadius(8f, false);
+
+        UILabel title = new UILabel("Customize " + player.getName());
+        title.setPosition(20f, 14f, false);
+        title.setSize(580f, 44f, false);
+        title.setFontSize(27f);
+        title.setFontColor((int) 0xF4E3A1FFL);
+        title.setTextAlign(TextAnchor.MiddleCenter);
+        window.addChild(title);
+
+        UILabel close = appearanceButton("X", 572f, 14f, 28f);
+        close.setSize(28f, 28f, false);
+        close.setFontSize(16f);
+        close.setBackgroundColor((int) 0x8B2E35FFL);
+        window.addChild(close);
+
+        UILabel gender = appearanceButton("Gender", 40f, 78f, 250f);
+        UILabel skinColor = appearanceButton("Skin Color", 330f, 78f, 250f);
+        UILabel hairMinus = appearanceButton("Hair -", 40f, 150f, 115f);
+        UILabel hairValue = appearanceValue("Hair: 0", 165f, 150f);
+        UILabel hairPlus = appearanceButton("Hair +", 465f, 150f, 115f);
+        UILabel beardMinus = appearanceButton("Beard -", 40f, 222f, 115f);
+        UILabel beardValue = appearanceValue("Beard: 0", 165f, 222f);
+        UILabel beardPlus = appearanceButton("Beard +", 465f, 222f, 115f);
+        UILabel faceUnavailable = appearanceValue("Face markings are not available through the server API",
+                40f, 294f);
+        faceUnavailable.setSize(540f, 52f, false);
+        faceUnavailable.setFontSize(16f);
+        faceUnavailable.setFontColor((int) 0xAAAAAAFFL);
+        UILabel hairColor = appearanceButton("Hair Color", 40f, 366f, 160f);
+        UILabel eyeColor = appearanceButton("Eye Color", 220f, 366f, 160f);
+        UILabel finish = appearanceButton("Finish", 400f, 366f, 180f);
+        for (UILabel element : List.of(gender, skinColor, hairMinus, hairValue, hairPlus,
+                beardMinus, beardValue, beardPlus, faceUnavailable,
+                hairColor, eyeColor, finish)) window.addChild(element);
+
+        AppearanceView view = new AppearanceView(window, gender, skinColor, hairMinus, hairValue,
+                hairPlus, beardMinus, beardValue, beardPlus, hairColor, eyeColor, finish, close);
+        appearanceViews.put(player.getUID(), view);
+        refreshAppearanceLabels(player, view);
+        player.showInventory();
+        player.addUIElement(window, UITarget.Inventory);
+        player.stopInput(true, true);
+        player.setMouseCursorVisible(true);
+    }
+
+    private static UILabel appearanceButton(String text, float x, float y, float width) {
+        UILabel button = new UILabel(text);
+        button.setPosition(x, y, false);
+        button.setSize(width, 52f, false);
+        button.setFontSize(18f);
+        button.setFontColor((int) 0xFFFFFFFFL);
+        button.setTextAlign(TextAnchor.MiddleCenter);
+        button.setBackgroundColor((int) 0x345D82FFL);
+        button.setBorder(1f);
+        button.setBorderColor((int) 0x77AAFFFFL);
+        button.setBorderEdgeRadius(5f, false);
+        button.setClickable(true);
+        return button;
+    }
+
+    private static UILabel appearanceValue(String text, float x, float y) {
+        UILabel label = new UILabel(text);
+        label.setPosition(x, y, false);
+        label.setSize(290f, 52f, false);
+        label.setFontSize(19f);
+        label.setFontColor((int) 0xF4E3A1FFL);
+        label.setTextAlign(TextAnchor.MiddleCenter);
+        return label;
+    }
+
+    private static void refreshAppearanceLabels(Player player, AppearanceView view) {
+        Skin skin = player.getSkin();
+        view.gender().setText("Gender: " + skin.getGender().name());
+        view.hairValue().setText("Hairstyle: " + Byte.toUnsignedInt(skin.getHairstyle()));
+        view.beardValue().setText("Beard: " + Byte.toUnsignedInt(skin.getBeard()));
+        view.skinColor().setText("Skin Color\n" + colorHex(skin.getSkinColor()));
+        view.hairColor().setText("Hair Color\n" + colorHex(skin.getHairColor()));
+        view.eyeColor().setText("Eye Color\n" + colorHex(skin.getEyeColor()));
+    }
+
+    private void handleAppearanceClick(Player player, AppearanceView view, int elementId) {
+        Skin skin = player.getSkin();
+        if (elementId == view.gender().getID()) {
+            skin.setGender(skin.getGender() == Skin.Gender.Male ? Skin.Gender.Female : Skin.Gender.Male);
+            skin.setHairstyle((byte) 0);
+            skin.setBeard((byte) 0);
+            debug("Appearance gender changed for " + player.getUID());
+        } else if (elementId == view.hairMinus().getID()) {
+            skin.setHairstyle(cycleDefinition(skin.getHairstyle(), -1,
+                    hairstylesFor(skin.getGender())));
+        } else if (elementId == view.hairPlus().getID()) {
+            skin.setHairstyle(cycleDefinition(skin.getHairstyle(), 1,
+                    hairstylesFor(skin.getGender())));
+        } else if (elementId == view.beardMinus().getID()) {
+            skin.setBeard(cycleDefinition(skin.getBeard(), -1, BEARDS));
+        } else if (elementId == view.beardPlus().getID()) {
+            skin.setBeard(cycleDefinition(skin.getBeard(), 1, BEARDS));
+        } else if (elementId == view.skinColor().getID()) {
+            skin.setSkinColor(nextColor(skin.getSkinColor(), SKIN_COLORS));
+        } else if (elementId == view.hairColor().getID()) {
+            skin.setHairColor(nextColor(skin.getHairColor(), HAIR_COLORS));
+        } else if (elementId == view.eyeColor().getID()) {
+            skin.setEyeColor(nextColor(skin.getEyeColor(), EYE_COLORS));
+        } else if (elementId == view.finish().getID() || elementId == view.close().getID()) {
+            CharacterService.CharacterSummary active = activeCharacters.get(player.getUID());
+            if (active != null) characterService.saveCharacter(player, active);
+            appearanceViews.remove(player.getUID());
+            player.removeUIElement(view.window());
+            player.hideInventory();
+            player.stopInput(false, false);
+            player.setMouseCursorVisible(false);
+            player.sendTextMessage("<color=#77FF99>Character appearance saved.</color>");
+            return;
+        } else {
+            return;
+        }
+        refreshAppearanceLabels(player, view);
+        debug("Appearance values for " + player.getUID() + ": hair="
+                + Byte.toUnsignedInt(skin.getHairstyle()) + ", beard="
+                + Byte.toUnsignedInt(skin.getBeard()));
+        refreshNativeAppearancePreview(player);
+    }
+
+    private void refreshNativeAppearancePreview(Player player) {
+        // The inventory preview does not redraw for every Skin packet. Reopen it
+        // on the next plugin tick to force Rising World to render the new model.
+        player.hideInventory();
+        executeDelayed(0.1f, () -> {
+            if (appearanceViews.containsKey(player.getUID()) && player.isSpawned()) {
+                player.showInventory();
+                player.setMouseCursorVisible(true);
+            }
+        });
+    }
+
+    private static int[] hairstylesFor(Skin.Gender gender) {
+        return gender == Skin.Gender.Female ? FEMALE_HAIRSTYLES : MALE_HAIRSTYLES;
+    }
+
+    private static byte cycleDefinition(byte current, int delta, int[] allowedIds) {
+        int currentId = Byte.toUnsignedInt(current);
+        for (int index = 0; index < allowedIds.length; index++) {
+            if (allowedIds[index] == currentId) {
+                return (byte) allowedIds[Math.floorMod(index + delta, allowedIds.length)];
+            }
+        }
+        return (byte) allowedIds[delta < 0 ? allowedIds.length - 1 : 0];
+    }
+
+    private static int nextColor(int current, int[] palette) {
+        int rgb = current & 0xFFFFFF;
+        for (int index = 0; index < palette.length; index++) {
+            if (palette[index] == rgb) return palette[(index + 1) % palette.length];
+        }
+        return palette[0];
+    }
+
+    private static String colorHex(int color) {
+        return String.format(Locale.US, "#%06X", color & 0xFFFFFF);
+    }
+
+    private void confirmDeleteCharacter(Player player, CharacterService.CharacterSummary character) {
+        player.showMessageBox(MessageBoxButtons.Yes_No, "Delete character",
+                "Permanently delete " + character.name()
+                        + "? Their inventory, balance, and claims will also be deleted.",
+                -1, selectedButton -> {
+                    if (selectedButton == null || selectedButton != 0) return;
+                    try {
+                        CharacterService.CharacterSummary active = activeCharacters.get(player.getUID());
+                        characterService.deleteCharacter(player.getUID(), character);
+                        int removedClaims = claims.deleteClaimsByOwner(character.economyKey());
+                        economy.deleteAccount(character.economyKey());
+                        if (active != null && active.id().equals(character.id())) {
+                            activeCharacters.remove(player.getUID());
+                            UILabel balance = balanceLabels.remove(player.getUID());
+                            if (balance != null) player.removeUIElement(balance);
+                        }
+                        showCharacterSelection(player);
+                        player.sendTextMessage("<color=#77FF99>Deleted " + character.name() + " and "
+                                + removedClaims + " owned claim(s).</color>");
+                        debug("Deleted character " + character.name() + " [slot " + character.slot()
+                                + "] for account " + player.getUID());
+                    } catch (IllegalStateException exception) {
+                        player.showErrorMessageBox("Character deletion failed", exception.getMessage());
+                        showCharacterSelection(player);
                     }
                 });
     }
@@ -564,6 +943,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         economy.createAccount(character.economyKey(), economySettings.defaultBalance());
         CharacterSelectionView view = characterSelectionViews.remove(player.getUID());
         if (view != null) player.removeUIElement(view.window());
+        player.stopInput(false, false);
         player.setMouseCursorVisible(false);
         showBalance(player);
         showWorldClock(player);
@@ -1230,13 +1610,28 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     @EventMethod
     public void onStoreClick(PlayerUIElementClickEvent event) {
         Player player = event.getPlayer();
+        AppearanceView appearanceView = appearanceViews.get(player.getUID());
+        if (appearanceView != null) {
+            handleAppearanceClick(player, appearanceView, event.getUIElement().getID());
+            return;
+        }
         CharacterSelectionView selectionView = characterSelectionViews.get(player.getUID());
         if (selectionView != null) {
             int selectionElementId = event.getUIElement().getID();
+            if (selectionElementId == selectionView.closeButton().getID()) {
+                closeCharacterSelection(player, selectionView);
+                return;
+            }
             CharacterService.CharacterSummary character = selectionView.charactersByButtonId()
                     .get(selectionElementId);
             if (character != null) {
                 activateCharacter(player, character);
+                return;
+            }
+            CharacterService.CharacterSummary deleteCharacter = selectionView.deleteByButtonId()
+                    .get(selectionElementId);
+            if (deleteCharacter != null) {
+                confirmDeleteCharacter(player, deleteCharacter);
                 return;
             }
             Integer createSlot = selectionView.createSlotsByButtonId().get(selectionElementId);
@@ -1301,6 +1696,24 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         if (decrementItem != null) {
             changeCartQuantity(view, decrementItem, -1);
         }
+    }
+
+    private void closeCharacterSelection(Player player, CharacterSelectionView view) {
+        if (!activeCharacters.containsKey(player.getUID())) {
+            List<CharacterService.CharacterSummary> characters = characterService.getCharacters(player.getUID());
+            if (!characters.isEmpty()) {
+                // Closing the mandatory initial selector keeps isolation intact
+                // by continuing with the first existing (legacy) character.
+                activateCharacter(player, characters.get(0));
+                return;
+            }
+            player.sendTextMessage("<color=#FFAA66>Create a character before closing this menu.</color>");
+            return;
+        }
+        characterSelectionViews.remove(player.getUID());
+        player.removeUIElement(view.window());
+        player.stopInput(false, false);
+        player.setMouseCursorVisible(false);
     }
 
     @EventMethod
@@ -1377,6 +1790,14 @@ public final class RisingWorldStarter extends Plugin implements Listener {
 
     private record CharacterSelectionView(UIElement window,
                                           Map<Integer, CharacterService.CharacterSummary> charactersByButtonId,
-                                          Map<Integer, Integer> createSlotsByButtonId) {
+                                          Map<Integer, Integer> createSlotsByButtonId,
+                                          Map<Integer, CharacterService.CharacterSummary> deleteByButtonId,
+                                          UILabel closeButton) {
+    }
+
+    private record AppearanceView(UIElement window, UILabel gender, UILabel skinColor,
+                                  UILabel hairMinus, UILabel hairValue, UILabel hairPlus,
+                                  UILabel beardMinus, UILabel beardValue, UILabel beardPlus,
+                                  UILabel hairColor, UILabel eyeColor, UILabel finish, UILabel close) {
     }
 }

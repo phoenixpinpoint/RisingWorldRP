@@ -74,6 +74,15 @@ final class FileEconomyService implements EconomyApi {
         return true;
     }
 
+    @Override
+    public synchronized boolean deleteAccount(String playerUid) {
+        if (balances.remove(requireUid(playerUid)) == null) {
+            return false;
+        }
+        save();
+        return true;
+    }
+
     private void load() {
         if (!Files.exists(dataFile)) {
             return;

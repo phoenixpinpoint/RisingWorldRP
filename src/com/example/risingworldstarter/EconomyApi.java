@@ -17,4 +17,7 @@ public interface EconomyApi {
     long deposit(String playerUid, long amount);
 
     boolean withdraw(String playerUid, long amount);
+
+    /** Permanently removes an account and its balance. */
+    boolean deleteAccount(String playerUid);
 }
