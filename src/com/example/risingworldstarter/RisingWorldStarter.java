@@ -504,7 +504,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         itemList.setSize(720f, 390f, false);
         itemList.setVerticalScrollerVisibility(UIScrollView.ScrollerVisibility.Auto);
         itemList.setHorizontalScrollerVisibility(UIScrollView.ScrollerVisibility.Hidden);
-        itemList.setMouseWheelScrollSize(92f);
+        itemList.setMouseWheelScrollSize(46f);
         window.addChild(itemList);
 
         StoreView view = new StoreView(window, closeButton, searchField, itemList,

@@ -4,319 +4,319 @@
       "category": "Tool",
       "enabled": true,
       "name": "primitiveaxe",
-      "price": 100
+      "price": 180
     },
     "3": {
       "category": "Tool",
       "enabled": true,
       "name": "primitiveknife",
-      "price": 100
+      "price": 120
     },
     "10": {
       "category": "Tool",
       "enabled": true,
       "name": "axe",
-      "price": 100
+      "price": 850
     },
     "11": {
       "category": "Tool",
       "enabled": true,
       "name": "axesteel",
-      "price": 100
+      "price": 1900
     },
     "15": {
       "category": "Tool",
       "enabled": true,
       "name": "pickaxe",
-      "price": 100
+      "price": 900
     },
     "16": {
       "category": "Tool",
       "enabled": true,
       "name": "pickaxesteel",
-      "price": 100
+      "price": 2000
     },
     "20": {
       "category": "Tool",
       "enabled": true,
       "name": "sledgehammer",
-      "price": 100
+      "price": 1000
     },
     "21": {
       "category": "Tool",
       "enabled": true,
       "name": "sledgehammersteel",
-      "price": 100
+      "price": 2200
     },
     "25": {
       "category": "Tool",
       "enabled": true,
       "name": "rakewood",
-      "price": 100
+      "price": 300
     },
     "26": {
       "category": "Tool",
       "enabled": true,
       "name": "rake",
-      "price": 100
+      "price": 700
     },
     "30": {
       "category": "Tool",
       "enabled": true,
       "name": "sickle",
-      "price": 100
+      "price": 600
     },
     "31": {
       "category": "Tool",
       "enabled": true,
       "name": "sicklesteel",
-      "price": 100
+      "price": 1400
     },
     "35": {
       "category": "Tool",
       "enabled": true,
       "name": "scythe",
-      "price": 100
+      "price": 850
     },
     "36": {
       "category": "Tool",
       "enabled": true,
       "name": "scythesteel",
-      "price": 100
+      "price": 1900
     },
     "40": {
       "category": "Tool",
       "enabled": true,
       "name": "hoe",
-      "price": 100
+      "price": 650
     },
     "41": {
       "category": "Tool",
       "enabled": true,
       "name": "hoesteel",
-      "price": 100
+      "price": 1500
     },
     "45": {
       "category": "Utility",
       "enabled": true,
       "name": "paintbrush",
-      "price": 100
+      "price": 175
     },
     "46": {
       "category": "Utility",
       "enabled": true,
       "name": "paintroller",
-      "price": 100
+      "price": 250
     },
     "50": {
       "category": "Utility",
       "enabled": true,
       "name": "megaphone",
-      "price": 100
+      "price": 500
     },
     "51": {
       "category": "Utility",
       "enabled": true,
       "name": "walkietalkie",
-      "price": 100
+      "price": 900
     },
     "55": {
       "category": "Utility",
       "enabled": true,
       "name": "measuringtape",
-      "price": 100
+      "price": 150
     },
     "57": {
       "category": "Utility",
       "enabled": true,
       "name": "oldshears",
-      "price": 100
+      "price": 400
     },
     "59": {
       "category": "Utility",
       "enabled": true,
       "name": "map",
-      "price": 100
+      "price": 250
     },
     "60": {
       "category": "Utility",
       "enabled": false,
       "name": "blueprint",
-      "price": 100
+      "price": 400
     },
     "61": {
       "category": "Utility",
       "enabled": true,
       "name": "blueprintempty",
-      "price": 100
+      "price": 400
     },
     "62": {
       "category": "Utility",
       "enabled": true,
       "name": "poster",
-      "price": 100
+      "price": 400
     },
     "63": {
       "category": "Utility",
       "enabled": true,
       "name": "decal",
-      "price": 100
+      "price": 400
     },
     "65": {
       "category": "Utility",
       "enabled": true,
       "name": "compassold",
-      "price": 100
+      "price": 350
     },
     "66": {
       "category": "Utility",
       "enabled": true,
       "name": "compassmodern",
-      "price": 100
+      "price": 700
     },
     "67": {
       "category": "Utility",
       "enabled": true,
       "name": "clockold",
-      "price": 100
+      "price": 450
     },
     "71": {
       "category": "Utility",
       "enabled": true,
       "name": "toolbelt",
-      "price": 100
+      "price": 1800
     },
     "75": {
       "category": "Utility",
       "enabled": true,
       "name": "torch",
-      "price": 100
+      "price": 80
     },
     "77": {
       "category": "Object",
       "enabled": true,
       "name": "lantern",
-      "price": 100
+      "price": 400
     },
     "80": {
       "category": "Utility",
       "enabled": true,
       "name": "penlight",
-      "price": 100
+      "price": 300
     },
     "82": {
       "category": "Utility",
       "enabled": true,
       "name": "flashlight",
-      "price": 100
+      "price": 500
     },
     "83": {
       "category": "Utility",
       "enabled": true,
       "name": "flashlightlarge",
-      "price": 100
+      "price": 850
     },
     "88": {
       "category": "Resource",
       "enabled": true,
       "name": "gunpowder",
-      "price": 100
+      "price": 180
     },
     "90": {
       "category": "Explosive",
       "enabled": true,
       "name": "fireworkrocket",
-      "price": 100
+      "price": 250
     },
     "97": {
       "category": "Utility",
       "enabled": true,
       "name": "magnifyingglass",
-      "price": 100
+      "price": 200
     },
     "100": {
       "category": "Utility",
       "enabled": true,
       "name": "bucketwood",
-      "price": 100
+      "price": 180
     },
     "105": {
       "category": "Utility",
       "enabled": true,
       "name": "wateringcan",
-      "price": 100
+      "price": 450
     },
     "110": {
       "category": "Utility",
       "enabled": true,
       "name": "waterskin",
-      "price": 100
+      "price": 220
     },
     "111": {
       "category": "Utility",
       "enabled": true,
       "name": "canteen",
-      "price": 100
+      "price": 350
     },
     "112": {
       "category": "Utility",
       "enabled": true,
       "name": "bottle",
-      "price": 100
+      "price": 40
     },
     "120": {
       "category": "Utility",
       "enabled": true,
       "name": "fishingrod",
-      "price": 100
+      "price": 500
     },
     "130": {
       "category": "Utility",
       "enabled": true,
       "name": "oredetector",
-      "price": 100
+      "price": 5000
     },
     "132": {
       "category": "Tool",
       "enabled": true,
       "name": "chainsaw",
-      "price": 100
+      "price": 6000
     },
     "134": {
       "category": "Tool",
       "enabled": true,
       "name": "miningdrill",
-      "price": 100
+      "price": 7000
     },
     "136": {
       "category": "Tool",
       "enabled": true,
       "name": "trimmer",
-      "price": 100
+      "price": 4500
     },
     "140": {
       "category": "Utility",
       "enabled": true,
       "name": "climbingrope",
-      "price": 100
+      "price": 750
     },
     "141": {
       "category": "Utility",
       "enabled": true,
       "name": "grapplinggun",
-      "price": 100
+      "price": 2500
     },
     "143": {
       "category": "Resource",
       "enabled": true,
       "name": "lightbulb",
-      "price": 100
+      "price": 120
     },
     "145": {
       "category": "Resource",
       "enabled": true,
       "name": "circuitboard",
-      "price": 100
+      "price": 650
     },
     "150": {
       "category": "Medical",
@@ -328,1033 +328,1033 @@
       "category": "Medical",
       "enabled": true,
       "name": "splint",
-      "price": 100
+      "price": 175
     },
     "154": {
       "category": "Medical",
       "enabled": true,
       "name": "medkit",
-      "price": 100
+      "price": 650
     },
     "160": {
       "category": "Resource",
       "enabled": true,
       "name": "paper",
-      "price": 100
+      "price": 25
     },
     "162": {
       "category": "Resource",
       "enabled": true,
       "name": "yarn",
-      "price": 100
+      "price": 45
     },
     "163": {
       "category": "Resource",
       "enabled": true,
       "name": "rags",
-      "price": 100
+      "price": 45
     },
     "164": {
       "category": "Resource",
       "enabled": true,
       "name": "coarsecloth",
-      "price": 100
+      "price": 45
     },
     "166": {
       "category": "Resource",
       "enabled": true,
       "name": "rope",
-      "price": 100
+      "price": 90
     },
     "171": {
       "category": "Resource",
       "enabled": true,
       "name": "hempfibers",
-      "price": 100
+      "price": 45
     },
     "172": {
       "category": "Resource",
       "enabled": true,
       "name": "wool",
-      "price": 100
+      "price": 45
     },
     "173": {
       "category": "Resource",
       "enabled": true,
       "name": "cotton",
-      "price": 100
+      "price": 45
     },
     "175": {
       "category": "Resource",
       "enabled": true,
       "name": "wheat",
-      "price": 100
+      "price": 45
     },
     "177": {
       "category": "Resource",
       "enabled": true,
       "name": "turtleshell",
-      "price": 100
+      "price": 175
     },
     "178": {
       "category": "Resource",
       "enabled": true,
       "name": "leather",
-      "price": 100
+      "price": 150
     },
     "180": {
       "category": "Resource",
       "enabled": true,
       "name": "antlerdeer",
-      "price": 100
+      "price": 175
     },
     "181": {
       "category": "Resource",
       "enabled": true,
       "name": "antlerdeerred",
-      "price": 100
+      "price": 175
     },
     "182": {
       "category": "Resource",
       "enabled": true,
       "name": "antlermoose",
-      "price": 100
+      "price": 175
     },
     "186": {
       "category": "Weapon",
       "enabled": true,
       "name": "combatknife",
-      "price": 100
+      "price": 1100
     },
     "190": {
       "category": "Weapon",
       "enabled": true,
       "name": "primitivespear",
-      "price": 100
+      "price": 350
     },
     "191": {
       "category": "Weapon",
       "enabled": true,
       "name": "javelinspear",
-      "price": 100
+      "price": 650
     },
     "195": {
       "category": "Weapon",
       "enabled": true,
       "name": "bow1",
-      "price": 100
+      "price": 700
     },
     "205": {
       "category": "Weapon",
       "enabled": true,
       "name": "crossbow",
-      "price": 100
+      "price": 1200
     },
     "210": {
       "category": "Weapon",
       "enabled": true,
       "name": "sword1",
-      "price": 100
+      "price": 2200
     },
     "211": {
       "category": "Weapon",
       "enabled": true,
       "name": "sword2",
-      "price": 100
+      "price": 2200
     },
     "212": {
       "category": "Weapon",
       "enabled": true,
       "name": "sword3",
-      "price": 100
+      "price": 2200
     },
     "213": {
       "category": "Weapon",
       "enabled": true,
       "name": "sword4",
-      "price": 100
+      "price": 2200
     },
     "214": {
       "category": "Weapon",
       "enabled": true,
       "name": "sword5",
-      "price": 100
+      "price": 2200
     },
     "215": {
       "category": "Weapon",
       "enabled": true,
       "name": "sword6",
-      "price": 100
+      "price": 2200
     },
     "216": {
       "category": "Weapon",
       "enabled": true,
       "name": "sword7",
-      "price": 100
+      "price": 2200
     },
     "218": {
       "category": "Weapon",
       "enabled": true,
       "name": "sword9",
-      "price": 100
+      "price": 2200
     },
     "219": {
       "category": "Weapon",
       "enabled": true,
       "name": "sword10",
-      "price": 100
+      "price": 2200
     },
     "220": {
       "category": "Weapon",
       "enabled": true,
       "name": "sword11",
-      "price": 100
+      "price": 2200
     },
     "221": {
       "category": "Weapon",
       "enabled": true,
       "name": "sword12",
-      "price": 100
+      "price": 2200
     },
     "250": {
       "category": "Weapon",
       "enabled": true,
       "name": "morningstar1",
-      "price": 100
+      "price": 1800
     },
     "300": {
       "category": "Weapon",
       "enabled": true,
       "name": "repeater",
-      "price": 100
+      "price": 7500
     },
     "331": {
       "category": "Ammo",
       "enabled": true,
       "name": "arrowprimitive",
-      "price": 100
+      "price": 8
     },
     "332": {
       "category": "Ammo",
       "enabled": true,
       "name": "arrow",
-      "price": 100
+      "price": 15
     },
     "333": {
       "category": "Ammo",
       "enabled": true,
       "name": "arrowexplosive",
-      "price": 100
+      "price": 180
     },
     "341": {
       "category": "Ammo",
       "enabled": true,
       "name": "bolt",
-      "price": 100
+      "price": 25
     },
     "353": {
       "category": "Ammo",
       "enabled": true,
       "name": "ammorepeater",
-      "price": 100
+      "price": 60
     },
     "370": {
       "category": "Explosive",
       "enabled": true,
       "name": "bomb",
-      "price": 100
+      "price": 700
     },
     "371": {
       "category": "Explosive",
       "enabled": true,
       "name": "dynamite",
-      "price": 100
+      "price": 1000
     },
     "398": {
       "category": "Resource",
       "enabled": true,
       "name": "grasspatch",
-      "price": 100
+      "price": 12
     },
     "399": {
       "category": "Resource",
       "enabled": true,
       "name": "grass",
-      "price": 100
+      "price": 12
     },
     "400": {
       "category": "Resource",
       "enabled": true,
       "name": "stone",
-      "price": 100
+      "price": 12
     },
     "401": {
       "category": "Resource",
       "enabled": true,
       "name": "gravel",
-      "price": 100
+      "price": 12
     },
     "402": {
       "category": "Resource",
       "enabled": true,
       "name": "dirt",
-      "price": 100
+      "price": 12
     },
     "403": {
       "category": "Resource",
       "enabled": true,
       "name": "mud",
-      "price": 100
+      "price": 12
     },
     "404": {
       "category": "Resource",
       "enabled": true,
       "name": "forestground",
-      "price": 100
+      "price": 12
     },
     "405": {
       "category": "Resource",
       "enabled": true,
       "name": "volcanicrock",
-      "price": 100
+      "price": 50
     },
     "406": {
       "category": "Resource",
       "enabled": true,
       "name": "obsidian",
-      "price": 100
+      "price": 50
     },
     "407": {
       "category": "Resource",
       "enabled": true,
       "name": "sand",
-      "price": 100
+      "price": 12
     },
     "408": {
       "category": "Resource",
       "enabled": true,
       "name": "sandstone",
-      "price": 100
+      "price": 12
     },
     "409": {
       "category": "Resource",
       "enabled": true,
       "name": "redclay",
-      "price": 100
+      "price": 50
     },
     "410": {
       "category": "Resource",
       "enabled": true,
       "name": "snow",
-      "price": 100
+      "price": 12
     },
     "411": {
       "category": "Resource",
       "enabled": true,
       "name": "ice",
-      "price": 100
+      "price": 50
     },
     "412": {
       "category": "Resource",
       "enabled": true,
       "name": "hellstone",
-      "price": 100
+      "price": 12
     },
     "413": {
       "category": "Resource",
       "enabled": true,
       "name": "cobble",
-      "price": 100
+      "price": 12
     },
     "414": {
       "category": "Resource",
       "enabled": true,
       "name": "underwaterrock",
-      "price": 100
+      "price": 12
     },
     "430": {
       "category": "Resource",
       "enabled": true,
       "name": "coal",
-      "price": 100
+      "price": 30
     },
     "431": {
       "category": "Resource",
       "enabled": true,
       "name": "sulfur",
-      "price": 100
+      "price": 60
     },
     "435": {
       "category": "Resource",
       "enabled": true,
       "name": "coalpowder",
-      "price": 100
+      "price": 45
     },
     "436": {
       "category": "Resource",
       "enabled": true,
       "name": "sulfurpowder",
-      "price": 100
+      "price": 90
     },
     "440": {
       "category": "Resource",
       "enabled": true,
       "name": "ironore",
-      "price": 100
+      "price": 90
     },
     "441": {
       "category": "Resource",
       "enabled": true,
       "name": "goldore",
-      "price": 100
+      "price": 180
     },
     "442": {
       "category": "Resource",
       "enabled": true,
       "name": "aluminiumore",
-      "price": 100
+      "price": 110
     },
     "443": {
       "category": "Resource",
       "enabled": true,
       "name": "tungstenore",
-      "price": 100
+      "price": 260
     },
     "450": {
       "category": "Resource",
       "enabled": true,
       "name": "ironingot",
-      "price": 100
+      "price": 260
     },
     "451": {
       "category": "Resource",
       "enabled": true,
       "name": "goldingot",
-      "price": 100
+      "price": 550
     },
     "452": {
       "category": "Resource",
       "enabled": true,
       "name": "aluminiumingot",
-      "price": 100
+      "price": 320
     },
     "453": {
       "category": "Resource",
       "enabled": true,
       "name": "tungsteningot",
-      "price": 100
+      "price": 800
     },
     "465": {
       "category": "Resource",
       "enabled": true,
       "name": "rawglass",
-      "price": 100
+      "price": 80
     },
     "470": {
       "category": "Resource",
       "enabled": true,
       "name": "ironplate",
-      "price": 100
+      "price": 380
     },
     "471": {
       "category": "Resource",
       "enabled": true,
       "name": "goldplate",
-      "price": 100
+      "price": 800
     },
     "472": {
       "category": "Resource",
       "enabled": true,
       "name": "aluminiumplate",
-      "price": 100
+      "price": 460
     },
     "473": {
       "category": "Resource",
       "enabled": true,
       "name": "tungstenplate",
-      "price": 100
+      "price": 1150
     },
     "490": {
       "category": "Resource",
       "enabled": true,
       "name": "ironwire",
-      "price": 100
+      "price": 220
     },
     "491": {
       "category": "Resource",
       "enabled": true,
       "name": "goldwire",
-      "price": 100
+      "price": 475
     },
     "492": {
       "category": "Resource",
       "enabled": true,
       "name": "aluminiumwire",
-      "price": 100
+      "price": 270
     },
     "493": {
       "category": "Resource",
       "enabled": true,
       "name": "tungstenwire",
-      "price": 100
+      "price": 675
     },
     "500": {
       "category": "Resource",
-      "enabled": true,
+      "enabled": false,
       "name": "branch",
-      "price": 100
+      "price": 5
     },
     "501": {
       "category": "Resource",
       "enabled": true,
       "name": "stick",
-      "price": 100
+      "price": 10
     },
     "502": {
       "category": "Resource",
       "enabled": true,
       "name": "lumber",
-      "price": 100
+      "price": 60
     },
     "504": {
       "category": "Resource",
       "enabled": true,
       "name": "nails",
-      "price": 100
+      "price": 40
     },
     "510": {
       "category": "Treelog",
       "enabled": true,
       "name": "treelog",
-      "price": 100
+      "price": 90
     },
     "511": {
       "category": "Treelog",
       "enabled": true,
       "name": "treeloghickory",
-      "price": 100
+      "price": 90
     },
     "512": {
       "category": "Treelog",
       "enabled": true,
       "name": "treelogacacia",
-      "price": 100
+      "price": 90
     },
     "513": {
       "category": "Treelog",
       "enabled": true,
       "name": "treelogaraucaria",
-      "price": 100
+      "price": 90
     },
     "514": {
       "category": "Treelog",
       "enabled": true,
       "name": "treelogbirch",
-      "price": 100
+      "price": 90
     },
     "515": {
       "category": "Treelog",
       "enabled": true,
       "name": "treeloglondonplane",
-      "price": 100
+      "price": 90
     },
     "516": {
       "category": "Treelog",
       "enabled": true,
       "name": "treelogcypress",
-      "price": 100
+      "price": 90
     },
     "517": {
       "category": "Treelog",
       "enabled": true,
       "name": "treelogcactus",
-      "price": 100
+      "price": 90
     },
     "518": {
       "category": "Treelog",
       "enabled": true,
       "name": "treelogpalm",
-      "price": 100
+      "price": 90
     },
     "519": {
       "category": "Treelog",
       "enabled": true,
       "name": "treelogredmaple",
-      "price": 100
+      "price": 90
     },
     "520": {
       "category": "Treelog",
       "enabled": true,
       "name": "treelogspruce",
-      "price": 100
+      "price": 90
     },
     "521": {
       "category": "Treelog",
       "enabled": true,
       "name": "treelogweepingbeech",
-      "price": 100
+      "price": 90
     },
     "522": {
       "category": "Treelog",
       "enabled": true,
       "name": "treelogwillowoak",
-      "price": 100
+      "price": 90
     },
     "523": {
       "category": "Treelog",
       "enabled": true,
       "name": "treelogapple",
-      "price": 100
+      "price": 90
     },
     "524": {
       "category": "Treelog",
       "enabled": true,
       "name": "treelogmesquite",
-      "price": 100
+      "price": 90
     },
     "525": {
       "category": "Treelog",
       "enabled": true,
       "name": "treelogaleppo",
-      "price": 100
+      "price": 90
     },
     "550": {
       "category": "Sapling",
       "enabled": true,
       "name": "sapling",
-      "price": 100
+      "price": 85
     },
     "551": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplinghickory",
-      "price": 100
+      "price": 85
     },
     "552": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingacacia",
-      "price": 100
+      "price": 85
     },
     "553": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingaraucaria",
-      "price": 100
+      "price": 85
     },
     "554": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingbirch",
-      "price": 100
+      "price": 85
     },
     "555": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplinglondonplane",
-      "price": 100
+      "price": 85
     },
     "556": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingcypress",
-      "price": 100
+      "price": 85
     },
     "557": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingcactus",
-      "price": 100
+      "price": 85
     },
     "558": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingpalm",
-      "price": 100
+      "price": 85
     },
     "559": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingredmaple",
-      "price": 100
+      "price": 85
     },
     "560": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingspruce",
-      "price": 100
+      "price": 85
     },
     "561": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingspruceforest",
-      "price": 100
+      "price": 85
     },
     "562": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingweepingbeech",
-      "price": 100
+      "price": 85
     },
     "563": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingwillowoak",
-      "price": 100
+      "price": 85
     },
     "564": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingapple",
-      "price": 100
+      "price": 85
     },
     "565": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingmesquite",
-      "price": 100
+      "price": 85
     },
     "566": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingbiznaga",
-      "price": 100
+      "price": 85
     },
     "567": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingaleppo",
-      "price": 100
+      "price": 85
     },
     "588": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingsugarbeet",
-      "price": 100
+      "price": 30
     },
     "589": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingwheat",
-      "price": 100
+      "price": 30
     },
     "590": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingtomato",
-      "price": 100
+      "price": 30
     },
     "591": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingchili",
-      "price": 100
+      "price": 30
     },
     "592": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingcorn",
-      "price": 100
+      "price": 30
     },
     "593": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingpotato",
-      "price": 100
+      "price": 30
     },
     "594": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplinghemp",
-      "price": 100
+      "price": 30
     },
     "595": {
       "category": "Sapling",
       "enabled": true,
       "name": "watermelonseeds",
-      "price": 100
+      "price": 30
     },
     "596": {
       "category": "Sapling",
       "enabled": true,
       "name": "pumpkinseeds",
-      "price": 100
+      "price": 30
     },
     "597": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplinglettuce",
-      "price": 100
+      "price": 30
     },
     "598": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingcarrot",
-      "price": 100
+      "price": 30
     },
     "599": {
       "category": "Sapling",
       "enabled": true,
       "name": "saplingcotton",
-      "price": 100
+      "price": 30
     },
     "600": {
       "category": "Food",
       "enabled": true,
       "name": "apple",
-      "price": 100
+      "price": 25
     },
     "601": {
       "category": "Food",
       "enabled": true,
       "name": "bellpepper",
-      "price": 100
+      "price": 25
     },
     "602": {
       "category": "Food",
       "enabled": true,
       "name": "carrot",
-      "price": 100
+      "price": 25
     },
     "603": {
       "category": "Food",
       "enabled": true,
       "name": "chili",
-      "price": 100
+      "price": 25
     },
     "604": {
       "category": "Food",
       "enabled": true,
       "name": "corncob",
-      "price": 100
+      "price": 25
     },
     "605": {
       "category": "Food",
       "enabled": true,
       "name": "gingerroot",
-      "price": 100
+      "price": 25
     },
     "606": {
       "category": "Food",
       "enabled": true,
       "name": "lettuce",
-      "price": 100
+      "price": 25
     },
     "607": {
       "category": "Food",
       "enabled": true,
       "name": "lettuceleaves",
-      "price": 100
+      "price": 25
     },
     "608": {
       "category": "Food",
       "enabled": true,
       "name": "pear",
-      "price": 100
+      "price": 25
     },
     "609": {
       "category": "Food",
       "enabled": true,
       "name": "ripepear",
-      "price": 100
+      "price": 25
     },
     "610": {
       "category": "Food",
       "enabled": true,
       "name": "potato",
-      "price": 100
+      "price": 25
     },
     "611": {
       "category": "Food",
       "enabled": true,
       "name": "tomato",
-      "price": 100
+      "price": 25
     },
     "612": {
       "category": "Food",
       "enabled": true,
       "name": "watermelon",
-      "price": 100
+      "price": 35
     },
     "613": {
       "category": "Food",
       "enabled": true,
       "name": "watermelonslice",
-      "price": 100
+      "price": 25
     },
     "614": {
       "category": "Food",
       "enabled": true,
       "name": "pumpkin",
-      "price": 100
+      "price": 35
     },
     "615": {
       "category": "Food",
       "enabled": true,
       "name": "pumpkinslice",
-      "price": 100
+      "price": 25
     },
     "618": {
       "category": "Food",
       "enabled": true,
       "name": "coconut",
-      "price": 100
+      "price": 35
     },
     "619": {
       "category": "Food",
       "enabled": true,
       "name": "coconutslice",
-      "price": 100
+      "price": 25
     },
     "620": {
       "category": "Food",
       "enabled": true,
       "name": "sugarbeet",
-      "price": 100
+      "price": 25
     },
     "621": {
       "category": "Food",
       "enabled": true,
       "name": "eggplant",
-      "price": 100
+      "price": 25
     },
     "622": {
       "category": "Food",
       "enabled": true,
       "name": "potatocooked",
-      "price": 100
+      "price": 50
     },
     "623": {
       "category": "Food",
       "enabled": true,
       "name": "potatoburned",
-      "price": 100
+      "price": 5
     },
     "624": {
       "category": "Food",
       "enabled": true,
       "name": "corncobcooked",
-      "price": 100
+      "price": 50
     },
     "625": {
       "category": "Food",
       "enabled": true,
       "name": "corncobburned",
-      "price": 100
+      "price": 5
     },
     "626": {
       "category": "Food",
       "enabled": true,
       "name": "pumpkinslicecooked",
-      "price": 100
+      "price": 50
     },
     "627": {
       "category": "Food",
       "enabled": true,
       "name": "pumpkinsliceburned",
-      "price": 100
+      "price": 5
     },
     "635": {
       "category": "Food",
       "enabled": true,
       "name": "flour",
-      "price": 100
+      "price": 45
     },
     "640": {
       "category": "Food",
       "enabled": true,
       "name": "egg",
-      "price": 100
+      "price": 25
     },
     "641": {
       "category": "Food",
       "enabled": true,
       "name": "eggcooked",
-      "price": 100
+      "price": 50
     },
     "652": {
       "category": "Food",
       "enabled": true,
       "name": "carrotslices",
-      "price": 100
+      "price": 15
     },
     "675": {
       "category": "Food",
       "enabled": true,
       "name": "butter",
-      "price": 100
+      "price": 45
     },
     "680": {
       "category": "Food",
       "enabled": true,
       "name": "bread",
-      "price": 100
+      "price": 45
     },
     "681": {
       "category": "Food",
       "enabled": true,
       "name": "breaddough",
-      "price": 100
+      "price": 35
     },
     "682": {
       "category": "Food",
       "enabled": true,
       "name": "breadburned",
-      "price": 100
+      "price": 5
     },
     "683": {
       "category": "Food",
       "enabled": true,
       "name": "breadhalf",
-      "price": 100
+      "price": 35
     },
     "690": {
       "category": "Food",
       "enabled": true,
       "name": "cookie",
-      "price": 100
+      "price": 45
     },
     "691": {
       "category": "Food",
       "enabled": true,
       "name": "cookiedough",
-      "price": 100
+      "price": 35
     },
     "692": {
       "category": "Food",
       "enabled": true,
       "name": "cookieburned",
-      "price": 100
+      "price": 5
     },
     "693": {
       "category": "Food",
       "enabled": true,
       "name": "candycane",
-      "price": 100
+      "price": 45
     },
     "697": {
       "category": "Resource",
       "enabled": true,
       "name": "heart",
-      "price": 100
+      "price": 175
     },
     "698": {
       "category": "Food",
       "enabled": true,
       "name": "guts",
-      "price": 100
+      "price": 25
     },
     "699": {
       "category": "Food",
       "enabled": true,
       "name": "gutsburned",
-      "price": 100
+      "price": 5
     },
     "700": {
       "category": "Food",
       "enabled": true,
       "name": "steak",
-      "price": 100
+      "price": 75
     },
     "701": {
       "category": "Food",
@@ -1366,19 +1366,19 @@
       "category": "Food",
       "enabled": true,
       "name": "steakburned",
-      "price": 100
+      "price": 5
     },
     "703": {
       "category": "Food",
       "enabled": true,
       "name": "steakdried",
-      "price": 100
+      "price": 110
     },
     "705": {
       "category": "Food",
       "enabled": true,
       "name": "bacon",
-      "price": 100
+      "price": 75
     },
     "706": {
       "category": "Food",
@@ -1390,19 +1390,19 @@
       "category": "Food",
       "enabled": true,
       "name": "baconburned",
-      "price": 100
+      "price": 5
     },
     "708": {
       "category": "Food",
       "enabled": true,
       "name": "bacondried",
-      "price": 100
+      "price": 110
     },
     "710": {
       "category": "Food",
       "enabled": true,
       "name": "snakemeat",
-      "price": 100
+      "price": 75
     },
     "711": {
       "category": "Food",
@@ -1414,157 +1414,157 @@
       "category": "Food",
       "enabled": true,
       "name": "snakemeatburned",
-      "price": 100
+      "price": 5
     },
     "713": {
       "category": "Food",
       "enabled": true,
       "name": "snakemeatdried",
-      "price": 100
+      "price": 110
     },
     "730": {
       "category": "Pelt",
       "enabled": true,
       "name": "bearpelt",
-      "price": 100
+      "price": 550
     },
     "731": {
       "category": "Pelt",
       "enabled": true,
       "name": "boarhide",
-      "price": 100
+      "price": 200
     },
     "733": {
       "category": "Pelt",
       "enabled": true,
       "name": "cowhide",
-      "price": 100
+      "price": 200
     },
     "734": {
       "category": "Pelt",
       "enabled": true,
       "name": "deerpelt",
-      "price": 100
+      "price": 200
     },
     "735": {
       "category": "Pelt",
       "enabled": true,
       "name": "deerredpelt",
-      "price": 100
+      "price": 200
     },
     "737": {
       "category": "Pelt",
       "enabled": true,
       "name": "elephanthide",
-      "price": 100
+      "price": 550
     },
     "738": {
       "category": "Pelt",
       "enabled": true,
       "name": "foxpelt",
-      "price": 100
+      "price": 200
     },
     "740": {
       "category": "Pelt",
       "enabled": true,
       "name": "goatpelt",
-      "price": 100
+      "price": 200
     },
     "741": {
       "category": "Pelt",
       "enabled": true,
       "name": "horsehide",
-      "price": 100
+      "price": 350
     },
     "742": {
       "category": "Pelt",
       "enabled": true,
       "name": "lionpelt",
-      "price": 100
+      "price": 550
     },
     "743": {
       "category": "Pelt",
       "enabled": true,
       "name": "moosepelt",
-      "price": 100
+      "price": 350
     },
     "744": {
       "category": "Pelt",
       "enabled": true,
       "name": "penguinhide",
-      "price": 100
+      "price": 200
     },
     "745": {
       "category": "Pelt",
       "enabled": true,
       "name": "pighide",
-      "price": 100
+      "price": 200
     },
     "747": {
       "category": "Pelt",
       "enabled": true,
       "name": "rhinohide",
-      "price": 100
+      "price": 550
     },
     "748": {
       "category": "Pelt",
       "enabled": true,
       "name": "sheeppelt",
-      "price": 100
+      "price": 200
     },
     "750": {
       "category": "Pelt",
       "enabled": true,
       "name": "wolfpelt",
-      "price": 100
+      "price": 200
     },
     "753": {
       "category": "Pelt",
       "enabled": true,
       "name": "zebrahide",
-      "price": 100
+      "price": 350
     },
     "754": {
       "category": "Pelt",
       "enabled": true,
       "name": "polarbearpelt",
-      "price": 100
+      "price": 550
     },
     "760": {
       "category": "Misc",
       "enabled": true,
       "name": "rubberduck",
-      "price": 100
+      "price": 75
     },
     "761": {
       "category": "Misc",
       "enabled": true,
       "name": "soccerball",
-      "price": 100
+      "price": 180
     },
     "765": {
       "category": "Misc",
       "enabled": true,
       "name": "musicdisc",
-      "price": 100
+      "price": 350
     },
     "770": {
       "category": "Bait",
       "enabled": true,
       "name": "earthworm",
-      "price": 100
+      "price": 8
     },
     "771": {
       "category": "Bait",
       "enabled": true,
       "name": "gutsbait",
-      "price": 100
+      "price": 15
     },
     "777": {
       "category": "Bag",
       "enabled": true,
       "name": "pouch",
-      "price": 100
+      "price": 800
     },
     "780": {
       "category": "Construction",
@@ -1582,49 +1582,49 @@
       "category": "Clothing",
       "enabled": false,
       "name": "clothingitem",
-      "price": 100
+      "price": 2000
     },
     "786": {
       "category": "Clothing",
       "enabled": false,
       "name": "oldboot",
-      "price": 100
+      "price": 2000
     },
     "790": {
       "category": "Object",
       "enabled": false,
       "name": "objectkit",
-      "price": 100
+      "price": 500
     },
     "791": {
       "category": "Object",
       "enabled": false,
       "name": "objectkitsmall",
-      "price": 100
+      "price": 500
     },
     "793": {
       "category": "Object",
       "enabled": true,
       "name": "tentbag",
-      "price": 100
+      "price": 1800
     },
     "795": {
       "category": "Object",
       "enabled": true,
       "name": "jackolantern1",
-      "price": 100
+      "price": 120
     },
     "796": {
       "category": "Object",
       "enabled": true,
       "name": "jackolantern2",
-      "price": 100
+      "price": 120
     },
     "799": {
       "category": "Object",
       "enabled": true,
       "name": "standingtorch",
-      "price": 100
+      "price": 180
     },
     "800": {
       "category": "Npc",
@@ -1678,151 +1678,151 @@
       "category": "Clothing",
       "enabled": true,
       "name": "saddlehorse",
-      "price": 100
+      "price": 2600
     },
     "831": {
       "category": "Clothing",
       "enabled": true,
       "name": "saddlebaghorse",
-      "price": 100
+      "price": 3200
     },
     "850": {
       "category": "Vehicle",
       "enabled": true,
       "name": "rowboatkit1",
-      "price": 100
+      "price": 5000
     },
     "851": {
       "category": "Vehicle",
       "enabled": true,
       "name": "rowboatkit2",
-      "price": 100
+      "price": 5000
     },
     "852": {
       "category": "Vehicle",
       "enabled": true,
       "name": "ribkit1",
-      "price": 100
+      "price": 9000
     },
     "853": {
       "category": "Vehicle",
       "enabled": true,
       "name": "ribkit2",
-      "price": 100
+      "price": 9000
     },
     "860": {
       "category": "Vehicle",
       "enabled": true,
       "name": "sailboatkit1",
-      "price": 100
+      "price": 12000
     },
     "861": {
       "category": "Vehicle",
       "enabled": true,
       "name": "sailboatkit2",
-      "price": 100
+      "price": 12000
     },
     "862": {
       "category": "Vehicle",
       "enabled": true,
       "name": "sailboatkit3",
-      "price": 100
+      "price": 12000
     },
     "863": {
       "category": "Vehicle",
       "enabled": true,
       "name": "sailboatkit4",
-      "price": 100
+      "price": 12000
     },
     "900": {
       "category": "Vehicle",
       "enabled": true,
       "name": "paddle1",
-      "price": 100
+      "price": 1000
     },
     "910": {
       "category": "Vehicle",
       "enabled": true,
       "name": "rowboatstorage",
-      "price": 100
+      "price": 2500
     },
     "912": {
       "category": "Vehicle",
       "enabled": true,
       "name": "sailboatstorage",
-      "price": 100
+      "price": 2500
     },
     "915": {
       "category": "Vehicle",
       "enabled": true,
       "name": "ribstorage",
-      "price": 100
+      "price": 2500
     },
     "920": {
       "category": "Vehicle",
       "enabled": true,
       "name": "engineboat1",
-      "price": 100
+      "price": 6000
     },
     "930": {
       "category": "Vehicle",
       "enabled": true,
       "name": "sail1",
-      "price": 100
+      "price": 1000
     },
     "1000": {
       "category": "Misc",
       "enabled": false,
       "name": "missingitem",
-      "price": 100
+      "price": 150
     },
     "1099": {
       "category": "Misc",
       "enabled": true,
       "name": "fishbone",
-      "price": 100
+      "price": 10
     },
     "1100": {
       "category": "Food",
       "enabled": true,
       "name": "herring",
-      "price": 100
+      "price": 45
     },
     "1101": {
       "category": "Food",
       "enabled": true,
       "name": "herringcooked",
-      "price": 100
+      "price": 70
     },
     "1102": {
       "category": "Food",
       "enabled": true,
       "name": "herringburned",
-      "price": 100
+      "price": 5
     },
     "1103": {
       "category": "Food",
       "enabled": true,
       "name": "herringdried",
-      "price": 100
+      "price": 80
     },
     "1105": {
       "category": "Food",
       "enabled": true,
       "name": "catfish",
-      "price": 100
+      "price": 65
     },
     "1106": {
       "category": "Food",
       "enabled": true,
       "name": "catfishcooked",
-      "price": 100
+      "price": 90
     },
     "1107": {
       "category": "Food",
       "enabled": true,
       "name": "catfishburned",
-      "price": 100
+      "price": 5
     },
     "1108": {
       "category": "Food",
@@ -1834,19 +1834,19 @@
       "category": "Food",
       "enabled": true,
       "name": "perch",
-      "price": 100
+      "price": 65
     },
     "1111": {
       "category": "Food",
       "enabled": true,
       "name": "perchcooked",
-      "price": 100
+      "price": 90
     },
     "1112": {
       "category": "Food",
       "enabled": true,
       "name": "perchburned",
-      "price": 100
+      "price": 5
     },
     "1113": {
       "category": "Food",
@@ -1858,19 +1858,19 @@
       "category": "Food",
       "enabled": true,
       "name": "carp",
-      "price": 100
+      "price": 65
     },
     "1116": {
       "category": "Food",
       "enabled": true,
       "name": "carpcooked",
-      "price": 100
+      "price": 90
     },
     "1117": {
       "category": "Food",
       "enabled": true,
       "name": "carpburned",
-      "price": 100
+      "price": 5
     },
     "1118": {
       "category": "Food",
@@ -1882,19 +1882,19 @@
       "category": "Food",
       "enabled": true,
       "name": "koi",
-      "price": 100
+      "price": 65
     },
     "1121": {
       "category": "Food",
       "enabled": true,
       "name": "koicooked",
-      "price": 100
+      "price": 90
     },
     "1122": {
       "category": "Food",
       "enabled": true,
       "name": "koiburned",
-      "price": 100
+      "price": 5
     },
     "1123": {
       "category": "Food",
@@ -1906,19 +1906,19 @@
       "category": "Food",
       "enabled": true,
       "name": "plaice",
-      "price": 100
+      "price": 65
     },
     "1126": {
       "category": "Food",
       "enabled": true,
       "name": "plaicecooked",
-      "price": 100
+      "price": 90
     },
     "1127": {
       "category": "Food",
       "enabled": true,
       "name": "plaiceburned",
-      "price": 100
+      "price": 5
     },
     "1128": {
       "category": "Food",
@@ -1930,43 +1930,43 @@
       "category": "Food",
       "enabled": true,
       "name": "salmon",
-      "price": 100
+      "price": 90
     },
     "1135": {
       "category": "Food",
       "enabled": true,
       "name": "shrimp",
-      "price": 100
+      "price": 65
     },
     "1136": {
       "category": "Food",
       "enabled": true,
       "name": "shrimpcooked",
-      "price": 100
+      "price": 90
     },
     "1137": {
       "category": "Food",
       "enabled": true,
       "name": "shrimpburned",
-      "price": 100
+      "price": 5
     },
     "1140": {
       "category": "Food",
       "enabled": true,
       "name": "trout",
-      "price": 100
+      "price": 65
     },
     "1141": {
       "category": "Food",
       "enabled": true,
       "name": "troutcooked",
-      "price": 100
+      "price": 90
     },
     "1142": {
       "category": "Food",
       "enabled": true,
       "name": "troutburned",
-      "price": 100
+      "price": 5
     },
     "1143": {
       "category": "Food",
@@ -1978,133 +1978,133 @@
       "category": "Food",
       "enabled": true,
       "name": "tuna",
-      "price": 100
+      "price": 90
     },
     "1150": {
       "category": "Food",
       "enabled": true,
       "name": "blobfish",
-      "price": 100
+      "price": 90
     },
     "1155": {
       "category": "Food",
       "enabled": true,
       "name": "seacucumber",
-      "price": 100
+      "price": 90
     },
     "1160": {
       "category": "Food",
       "enabled": true,
       "name": "turtle",
-      "price": 100
+      "price": 90
     },
     "1200": {
       "category": "Food",
       "enabled": true,
       "name": "salmonsteak",
-      "price": 100
+      "price": 90
     },
     "1201": {
       "category": "Food",
       "enabled": true,
       "name": "salmonsteakcooked",
-      "price": 100
+      "price": 115
     },
     "1202": {
       "category": "Food",
       "enabled": true,
       "name": "salmonsteakburned",
-      "price": 100
+      "price": 5
     },
     "1203": {
       "category": "Food",
       "enabled": true,
       "name": "salmonsteakdried",
-      "price": 100
+      "price": 125
     },
     "1205": {
       "category": "Food",
       "enabled": true,
       "name": "tunasteak",
-      "price": 100
+      "price": 90
     },
     "1206": {
       "category": "Food",
       "enabled": true,
       "name": "tunasteakcooked",
-      "price": 100
+      "price": 115
     },
     "1207": {
       "category": "Food",
       "enabled": true,
       "name": "tunasteakburned",
-      "price": 100
+      "price": 5
     },
     "1208": {
       "category": "Food",
       "enabled": true,
       "name": "tunasteakdried",
-      "price": 100
+      "price": 125
     },
     "1210": {
       "category": "Food",
       "enabled": true,
       "name": "blobfishmeat",
-      "price": 100
+      "price": 90
     },
     "1211": {
       "category": "Food",
       "enabled": true,
       "name": "blobfishmeatcooked",
-      "price": 100
+      "price": 115
     },
     "1212": {
       "category": "Food",
       "enabled": true,
       "name": "blobfishmeatburned",
-      "price": 100
+      "price": 5
     },
     "1215": {
       "category": "Food",
       "enabled": true,
       "name": "seacucumbermeat",
-      "price": 100
+      "price": 90
     },
     "1216": {
       "category": "Food",
       "enabled": true,
       "name": "seacucumbermeatcooked",
-      "price": 100
+      "price": 115
     },
     "1217": {
       "category": "Food",
       "enabled": true,
       "name": "seacucumbermeatburned",
-      "price": 100
+      "price": 5
     },
     "1218": {
       "category": "Food",
       "enabled": true,
       "name": "seacucumbermeatdried",
-      "price": 100
+      "price": 125
     },
     "1220": {
       "category": "Food",
       "enabled": true,
       "name": "turtlemeat",
-      "price": 100
+      "price": 90
     },
     "1221": {
       "category": "Food",
       "enabled": true,
       "name": "turtlemeatcooked",
-      "price": 100
+      "price": 115
     },
     "1222": {
       "category": "Food",
       "enabled": true,
       "name": "turtlemeatburned",
-      "price": 100
+      "price": 5
     }
   }
 }

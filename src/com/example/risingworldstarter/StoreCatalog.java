@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
 final class StoreCatalog {
     private static final Set<String> BLOCKED_ITEM_NAMES = Set.of(
             "clothingitem", "oldboot", "missingitem", "constructionitem",
-            "objectkit", "objectkitsmall", "plantitem", "blueprint");
+            "objectkit", "objectkitsmall", "plantitem", "blueprint", "branch");
     private static final Pattern JSON_ITEM = Pattern.compile("\\\"(-?\\d+)\\\"\\s*:\\s*\\{(.*?)\\}", Pattern.DOTALL);
     private final List<StoreItem> items;
 

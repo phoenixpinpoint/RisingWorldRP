@@ -144,7 +144,7 @@ remain hidden until explicitly priced.
 
 Internal placeholder items (`clothingitem`, `oldboot`, `missingitem`,
 `constructionitem`, `objectkit`, `objectkitsmall`, `plantitem`, and `blueprint`)
-and all items categorized or typed as NPCs are never purchasable. Their generated
+the iconless `branch`, and all items categorized or typed as NPCs are never purchasable. Their generated
 `enabled` field is forced to `false`, including in an existing configuration.
 
 If `marketplace.json` does not exist but the old `marketplace.properties` does,
