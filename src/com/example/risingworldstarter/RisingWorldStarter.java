@@ -1,5 +1,6 @@
 package com.example.risingworldstarter;
 
+import com.example.risingworldstarter.autotrim.WindowTrimService;
 import net.risingworld.api.Plugin;
 import net.risingworld.api.Server;
 import net.risingworld.api.Timer;
@@ -26,8 +27,6 @@ import net.risingworld.api.objects.Player;
 import net.risingworld.api.objects.Area;
 import net.risingworld.api.objects.Item;
 import net.risingworld.api.objects.Skin;
-import net.risingworld.api.objects.world.ObjectElement;
-import net.risingworld.api.objects.world.ConstructionElement;
 import net.risingworld.api.ui.UIElement;
 import net.risingworld.api.ui.UILabel;
 import net.risingworld.api.ui.MessageBoxButtons;
@@ -55,8 +54,6 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.Properties;
-import java.util.Set;
-import java.util.HashSet;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -110,6 +107,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private Path marketplaceConfigPath;
     private volatile boolean storeCatalogLoaded;
     private CharacterService characterService;
+    private WindowTrimService windowTrimService;
     private Timer worldClockTimer;
     private Timer characterAutosaveTimer;
     private PayPeriod lastSalaryPeriod;
@@ -141,6 +139,8 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         debug("Chest ownership and locks loaded");
         characterService = new CharacterService(worldDataPath.resolve("characters"));
         debug("Character service loaded with four slots per account");
+        windowTrimService = new WindowTrimService(RisingWorldStarter::debug);
+        debug("Window auto-trim service loaded");
 
         Path economyConfigPath = worldDataPath.resolve("economy.properties");
         economySettings = EconomySettings.load(economyConfigPath);
@@ -803,265 +803,10 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                     // coordinate and reliably identifies the surrounding wall.
                     resolvedPosition = result.getCollisionPoint();
                 }
-                finishAutoTrim(player, resolvedPosition, rotation, openingSize, door);
+                windowTrimService.trim(player, resolvedPosition, rotation, openingSize);
             });
         });
         return true;
-    }
-
-    private void finishAutoTrim(Player player, Vector3f position, Quaternion rotation,
-                                Vector3f openingSize, boolean door) {
-            if (!door) {
-                ConstructionElement placedWindow = findNearestWindow(position);
-                if (placedWindow != null) {
-                    position = placedWindow.getWorldPosition().copy();
-                    rotation = placedWindow.getRotation().copy();
-                    Vector3f actualSize = placedWindow.getScale();
-                    if (actualSize != null && actualSize.x > 0.05f
-                            && actualSize.y > 0.05f && actualSize.z > 0.02f) {
-                        openingSize = actualSize.copy();
-                    }
-                    debug("Auto-trim resolved placed window " + placedWindow.getGlobalID()
-                            + " at " + position + " with size " + openingSize);
-                }
-            }
-            int carved = carveTerrainOpening(position, rotation, openingSize, door);
-            int[] constructionStats = new int[3];
-            int constructionBlocks = carved == 0
-                    ? autoTrimOpening(position, rotation, openingSize, door, constructionStats) : 0;
-            int total = carved + constructionBlocks;
-            if (total > 0) {
-                player.sendTextMessage("<color=#77FF99>Auto-trimmed " + total
-                        + " wall block" + (total == 1 ? "" : "s") + " around the "
-                        + (door ? "door" : "window") + ".</color>");
-            } else {
-                Vector3i chunk = Utils.ChunkUtils.getChunkPosition(position);
-                player.sendTextMessage("<color=#FFAA66>Auto-trim diagnostic: chunk "
-                        + chunk.x + "," + chunk.z + "; no terrain or construction blocks intersected"
-                        + " (scanned " + constructionStats[0] + ", rectangular "
-                        + constructionStats[1] + "); opening "
-                        + String.format(Locale.US, "%.2f x %.2f x %.2f",
-                        openingSize.x, openingSize.y, openingSize.z) + ".</color>");
-            }
-    }
-
-    private ConstructionElement findNearestWindow(Vector3f nearPosition) {
-        Vector3i centerChunk = Utils.ChunkUtils.getChunkPosition(nearPosition);
-        ConstructionElement nearest = null;
-        float nearestDistanceSquared = 25f;
-        for (int chunkX = centerChunk.x - 1; chunkX <= centerChunk.x + 1; chunkX++) {
-            for (int chunkZ = centerChunk.z - 1; chunkZ <= centerChunk.z + 1; chunkZ++) {
-                var chunk = World.getChunk(chunkX, chunkZ);
-                if (chunk == null || !chunk.isValid()) continue;
-                ConstructionElement[] elements = chunk.getAllConstructionElements();
-                if (elements == null) continue;
-                for (ConstructionElement element : elements) {
-                    if (element == null || !element.isValid()) continue;
-                    Constructions.ConstructionDefinition definition =
-                            Definitions.getConstructionDefinition(element.getTypeID());
-                    if (definition == null || definition.type != Constructions.Type.Window) continue;
-                    Vector3f candidate = element.getWorldPosition();
-                    float dx = candidate.x - nearPosition.x;
-                    float dy = candidate.y - nearPosition.y;
-                    float dz = candidate.z - nearPosition.z;
-                    float distanceSquared = dx * dx + dy * dy + dz * dz;
-                    if (distanceSquared < nearestDistanceSquared) {
-                        nearestDistanceSquared = distanceSquared;
-                        nearest = element;
-                    }
-                }
-            }
-        }
-        return nearest;
-    }
-
-    private int carveTerrainOpening(Vector3f center, Quaternion rotation,
-                                    Vector3f openingSize, boolean door) {
-        float width = Math.max(openingSize.x, openingSize.z);
-        float height = openingSize.y;
-        Vector3f widthAxis = rotation.mult(Vector3f.RIGHT).normalize();
-        Vector3f normalAxis = rotation.mult(Vector3f.FORWARD).normalize();
-        Set<String> editedBlocks = new HashSet<>();
-        int carved = 0;
-        for (float widthOffset = -width * 0.5f + 0.25f;
-             widthOffset < width * 0.5f; widthOffset += 0.5f) {
-            for (float heightOffset = -height * 0.5f + 0.25f;
-                 heightOffset < height * 0.5f; heightOffset += 0.5f) {
-                for (float depthOffset = -0.5f; depthOffset <= 0.5f; depthOffset += 0.25f) {
-                    Vector3f sample = center.add(widthAxis.mult(widthOffset))
-                            .add(Vector3f.UP.mult(heightOffset)).add(normalAxis.mult(depthOffset));
-                    Vector3i chunk = new Vector3i();
-                    Vector3i block = new Vector3i();
-                    Utils.ChunkUtils.getChunkAndBlockPosition(sample, chunk, block);
-                    String key = chunk.x + "," + chunk.y + "," + chunk.z + ":"
-                            + block.x + "," + block.y + "," + block.z;
-                    if (!editedBlocks.add(key)) continue;
-                    var chunkPart = World.getChunkPart(chunk.x, chunk.y, chunk.z);
-                    if (chunkPart == null || !chunkPart.isValid()
-                            || chunkPart.getTerrainID(block.x, block.y, block.z) == 0) continue;
-                    World.setTerrainData(0, chunk.x, chunk.y, chunk.z,
-                            block.x, block.y, block.z,
-                            net.risingworld.api.world.EditRestriction.SolidOnly);
-                    carved++;
-                }
-            }
-        }
-        debug("Auto-trim terrain carve at " + center + ": removed " + carved
-                + " solid blocks from " + editedBlocks.size() + " sampled cells");
-        return carved;
-    }
-
-    private int autoTrimOpening(Vector3f openingPosition, Quaternion openingRotation,
-                                Vector3f openingSize, boolean door, int[] stats) {
-        Vector3i openingChunk = Utils.ChunkUtils.getChunkPosition(openingPosition);
-        int trimmed = 0;
-        int scanned = 0;
-        int compatible = 0;
-        List<ConstructionElement> intersecting = new ArrayList<>();
-        for (int chunkX = openingChunk.x - 1; chunkX <= openingChunk.x + 1; chunkX++) {
-            for (int chunkZ = openingChunk.z - 1; chunkZ <= openingChunk.z + 1; chunkZ++) {
-                var chunk = World.getChunk(chunkX, chunkZ);
-                if (chunk == null || !chunk.isValid()) continue;
-                ConstructionElement[] elements = chunk.getAllConstructionElements();
-                if (elements == null) continue;
-                for (ConstructionElement wall : elements) {
-                    scanned++;
-                    if (intersecting.size() >= 64 || !isAutoTrimWall(wall)) continue;
-                    compatible++;
-                    if (trimWallElement(wall, openingPosition, openingRotation, openingSize,
-                            door, 0)) intersecting.add(wall);
-                }
-            }
-        }
-        // Split every intersecting element, including walls assembled from
-        // several panels. The opening is now resolved from the placed window's
-        // true center, so whole-panel deletion is no longer necessary.
-        int trimMode = 1;
-        for (ConstructionElement wall : intersecting) {
-            if (trimWallElement(wall, openingPosition, openingRotation, openingSize,
-                    door, trimMode)) {
-                trimmed++;
-                stats[2]++;
-            }
-        }
-        debug("Auto-trim at " + openingPosition + " in chunk " + openingChunk.x + ","
-                + openingChunk.z + ": scanned=" + scanned + ", rectangular candidates="
-                + compatible + ", trimmed=" + trimmed + ", opening size=" + openingSize);
-        stats[0] = scanned;
-        stats[1] = compatible;
-        return trimmed;
-    }
-
-    private static boolean isAutoTrimWall(ConstructionElement element) {
-        if (element == null || !element.isValid()) return false;
-        Constructions.ConstructionDefinition definition = Definitions.getConstructionDefinition(element.getTypeID());
-        if (definition == null || definition.type == Constructions.Type.Window
-                || definition.shapetype != Constructions.ShapeType.Default) return false;
-        Vector3f size = constructionWorldSize(element, definition);
-        return size != null && size.y >= 0.25f && Math.max(size.x, size.z) >= 0.25f
-                && Math.min(size.x, size.z) <= 1.0f;
-    }
-
-    private static Vector3f constructionWorldSize(ConstructionElement element,
-                                                   Constructions.ConstructionDefinition definition) {
-        Vector3f scale = element.getScale();
-        // For placed construction blocks Rising World exposes the effective
-        // dimensions through getScale(). startsize describes the selector's
-        // initial held size and must not be applied again here.
-        return scale == null ? null : scale.copy();
-    }
-
-    private boolean trimWallElement(ConstructionElement wall, Vector3f openingPosition,
-                                    Quaternion openingRotation, Vector3f openingSize,
-                                    boolean door, int mode) {
-        Constructions.ConstructionDefinition definition = Definitions.getConstructionDefinition(wall.getTypeID());
-        if (definition == null) return false;
-        Vector3f wallSize = constructionWorldSize(wall, definition);
-        if (wallSize == null) return false;
-        Quaternion wallRotation = wall.getRotation().copy();
-        boolean widthIsX = wallSize.x >= wallSize.z;
-        float wallWidth = widthIsX ? wallSize.x : wallSize.z;
-        float wallThickness = widthIsX ? wallSize.z : wallSize.x;
-        float openingWidth = Math.max(openingSize.x, openingSize.z);
-        float openingHeight = openingSize.y;
-        if (openingWidth <= 0.05f || openingHeight <= 0.05f) return false;
-
-        Vector3f local = wallRotation.inverse().mult(openingPosition.subtract(wall.getWorldPosition()));
-        float localWidth = widthIsX ? local.x : local.z;
-        float localDepth = widthIsX ? local.z : local.x;
-        if (Math.abs(localDepth) > wallThickness * 0.5f + 0.45f) return false;
-
-        float wallMinW = -wallWidth * 0.5f;
-        float wallMaxW = wallWidth * 0.5f;
-        float wallMinY = -wallSize.y * 0.5f;
-        float wallMaxY = wallSize.y * 0.5f;
-        // Leave a small overlap behind the frame so floating-point placement
-        // and texture edges cannot expose daylight seams around the opening.
-        float frameOverlap = 0.06f;
-        float openingMinW = Math.max(wallMinW, localWidth - openingWidth * 0.5f + frameOverlap);
-        float openingMaxW = Math.min(wallMaxW, localWidth + openingWidth * 0.5f - frameOverlap);
-        float openingMinY = Math.max(wallMinY, local.y - openingHeight * 0.5f + frameOverlap);
-        float openingMaxY = Math.min(wallMaxY, local.y + openingHeight * 0.5f - frameOverlap);
-        if (door && openingMinY - wallMinY < 0.30f) openingMinY = wallMinY;
-        if (openingMaxW - openingMinW < 0.08f || openingMaxY - openingMinY < 0.08f) return false;
-
-        // Detection pass: gather all intersections before deciding whether this
-        // is one large panel or a wall assembled from several smaller panels.
-        if (mode == 0) return true;
-
-        if (mode == 2) {
-            wall.setScale(0.001f, 0.001f, 0.001f);
-            wall.destroy(true);
-            return true;
-        }
-
-        List<float[]> pieces = new ArrayList<>(4);
-        addTrimPiece(pieces, wallMinW, openingMinW, wallMinY, wallMaxY);
-        addTrimPiece(pieces, openingMaxW, wallMaxW, wallMinY, wallMaxY);
-        addTrimPiece(pieces, openingMinW, openingMaxW, wallMinY, openingMinY);
-        addTrimPiece(pieces, openingMinW, openingMaxW, openingMaxY, wallMaxY);
-        for (float[] piece : pieces) {
-            createTrimPiece(wall, wallRotation, wallSize, widthIsX, piece, wallThickness);
-        }
-
-        // Collapsing first is required to invalidate the old rendered mesh on
-        // clients before the original element is silently removed.
-        wall.setScale(0.001f, 0.001f, 0.001f);
-        wall.destroy(true);
-        return true;
-    }
-
-    private static void addTrimPiece(List<float[]> pieces, float minW, float maxW,
-                                     float minY, float maxY) {
-        if (maxW - minW >= 0.08f && maxY - minY >= 0.08f) {
-            pieces.add(new float[] {(minW + maxW) * 0.5f, (minY + maxY) * 0.5f,
-                    maxW - minW, maxY - minY});
-        }
-    }
-
-    private void createTrimPiece(ConstructionElement source, Quaternion rotation,
-                                 Vector3f sourceWorldSize, boolean widthIsX,
-                                 float[] piece, float thickness) {
-        Vector3f sourceScale = source.getScale();
-        if (sourceScale == null) return;
-        Vector3f localOffset = widthIsX
-                ? new Vector3f(piece[0], piece[1], 0f)
-                : new Vector3f(0f, piece[1], piece[0]);
-        Vector3f position = source.getWorldPosition().add(rotation.mult(localOffset));
-        Vector3f pieceWorldSize = widthIsX
-                ? new Vector3f(piece[2], piece[3], thickness)
-                : new Vector3f(thickness, piece[3], piece[2]);
-        Vector3f scale = new Vector3f(
-                sourceScale.x * pieceWorldSize.x / sourceWorldSize.x,
-                sourceScale.y * pieceWorldSize.y / sourceWorldSize.y,
-                sourceScale.z * pieceWorldSize.z / sourceWorldSize.z);
-        ConstructionElement created = World.createConstructionElement(source.getTypeID(), source.getTexture(),
-                source.getTextureScale(), source.getColor(), position, rotation.copy(), scale,
-                source.getSurfaceOffset(), source.getSurfaceScale());
-        if (created != null) {
-            created.setPlayerDbID(source.getPlayerDbID());
-            created.setStrength(source.getStrength());
-        }
     }
 
     private void listOwnedChunks(Player player) {
