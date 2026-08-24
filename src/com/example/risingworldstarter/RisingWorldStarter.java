@@ -21,11 +21,13 @@ import net.risingworld.api.events.player.world.*;
 import net.risingworld.api.assets.TextureAsset;
 import net.risingworld.api.definitions.Definitions;
 import net.risingworld.api.definitions.Items;
+import net.risingworld.api.definitions.Constructions;
 import net.risingworld.api.objects.Player;
 import net.risingworld.api.objects.Area;
 import net.risingworld.api.objects.Item;
 import net.risingworld.api.objects.Skin;
 import net.risingworld.api.objects.world.ObjectElement;
+import net.risingworld.api.objects.world.ConstructionElement;
 import net.risingworld.api.ui.UIElement;
 import net.risingworld.api.ui.UILabel;
 import net.risingworld.api.ui.MessageBoxButtons;
@@ -36,6 +38,7 @@ import net.risingworld.api.ui.style.Pivot;
 import net.risingworld.api.ui.style.ScaleMode;
 import net.risingworld.api.ui.style.TextAnchor;
 import net.risingworld.api.utils.Utils;
+import net.risingworld.api.utils.Quaternion;
 import net.risingworld.api.utils.Vector3f;
 import net.risingworld.api.utils.Vector3i;
 import net.risingworld.api.worldelements.Area3D;
@@ -52,6 +55,8 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -90,7 +95,12 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private final Map<String, AppearanceView> appearanceViews = new ConcurrentHashMap<>();
     private final Map<String, Long> claimProtectionNotices = new ConcurrentHashMap<>();
     private final Map<String, Long> deniedGrassRewardsUntil = new ConcurrentHashMap<>();
-    private final Map<String, EquippedItemSnapshot> lastEquippedItems = new ConcurrentHashMap<>();
+    private final Map<String, Short> lastEquippedItemTypes = new ConcurrentHashMap<>();
+    private final Map<String, Integer> lastEquippedItemVariants = new ConcurrentHashMap<>();
+    private final Map<String, String> lastEquippedConstructionNames = new ConcurrentHashMap<>();
+    private final Map<String, Integer> lastEquippedConstructionIds = new ConcurrentHashMap<>();
+    private final Map<String, Vector3f> lastEquippedConstructionSizes = new ConcurrentHashMap<>();
+    private final Map<String, Long> autoTrimScheduledAt = new ConcurrentHashMap<>();
     private EconomyApi economy;
     private ClaimService claims;
     private ClaimAdminService claimAdmins;
@@ -265,7 +275,12 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         appearanceViews.clear();
         claimProtectionNotices.clear();
         deniedGrassRewardsUntil.clear();
-        lastEquippedItems.clear();
+        lastEquippedItemTypes.clear();
+        lastEquippedItemVariants.clear();
+        lastEquippedConstructionNames.clear();
+        lastEquippedConstructionIds.clear();
+        lastEquippedConstructionSizes.clear();
+        autoTrimScheduledAt.clear();
         storeCatalogLoaded = false;
         System.out.println("[RisingWorldStarter] Disabled");
     }
@@ -341,7 +356,12 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         appearanceViews.remove(event.getPlayer().getUID());
         claimProtectionNotices.remove(event.getPlayer().getUID());
         deniedGrassRewardsUntil.remove(event.getPlayer().getUID());
-        lastEquippedItems.remove(event.getPlayer().getUID());
+        lastEquippedItemTypes.remove(event.getPlayer().getUID());
+        lastEquippedItemVariants.remove(event.getPlayer().getUID());
+        lastEquippedConstructionNames.remove(event.getPlayer().getUID());
+        lastEquippedConstructionIds.remove(event.getPlayer().getUID());
+        lastEquippedConstructionSizes.remove(event.getPlayer().getUID());
+        autoTrimScheduledAt.remove(event.getPlayer().getUID());
     }
 
     @EventMethod
@@ -350,19 +370,45 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         // Keep the last real item when the final unit disappears; the native
         // planting transaction may unequip it before its placement event fires.
         if (item != null && item.isValid()) {
-            lastEquippedItems.put(event.getPlayer().getUID(),
-                    new EquippedItemSnapshot(item.getTypeID(), item.getVariant()));
+            lastEquippedItemTypes.put(event.getPlayer().getUID(), item.getTypeID());
+            lastEquippedItemVariants.put(event.getPlayer().getUID(), item.getVariant());
+            if (item instanceof Item.ConstructionItem constructionItem) {
+                String uid = event.getPlayer().getUID();
+                String name = constructionItem.getConstructionName();
+                if (name != null) lastEquippedConstructionNames.put(uid, name);
+                lastEquippedConstructionIds.put(uid,
+                        Byte.toUnsignedInt(constructionItem.getConstructionID()));
+                Vector3f size = constructionItem.getSize();
+                if (size != null) lastEquippedConstructionSizes.put(uid, size.copy());
+            }
         }
     }
 
     /* Claim protection uses the chunk reported by the affected world element,
        rather than the chunk in which the player happens to be standing. */
     @EventMethod public void onPlaceConstruction(PlayerPlaceConstructionEvent event) {
-        protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ());
-        if (!event.isCancelled() && event.getAllPositions() != null) {
-            for (Vector3f position : event.getAllPositions()) {
-                protectOwnedLand(event, position);
-                if (event.isCancelled()) break;
+        Vector3i playerChunk = event.getPlayer().getChunkPosition();
+        protectOwnedLand(event, playerChunk.x, playerChunk.z);
+        int constructionTypeId = Byte.toUnsignedInt(event.getTypeID());
+        String equippedConstructionName = lastEquippedConstructionNames.get(event.getPlayer().getUID());
+        // The bundled definitions database currently lists window1-window10 as
+        // 100-109, while some runtime builds report additional window choices
+        // (including 111). Reserve the contiguous extension for those windows.
+        boolean windowConstruction = constructionTypeId >= 100 && constructionTypeId <= 119;
+        if (!windowConstruction && event.getConstructionDefinition() != null) {
+            windowConstruction = event.getConstructionDefinition().type == Constructions.Type.Window;
+        }
+        if (!windowConstruction && equippedConstructionName != null) {
+            windowConstruction = equippedConstructionName.toLowerCase(Locale.US).startsWith("window");
+        }
+        if (!event.isCancelled() && windowConstruction) {
+            Vector3f cachedSize = lastEquippedConstructionSizes.get(event.getPlayer().getUID());
+            Vector3f openingSize = cachedSize == null ? event.getSize().copy() : cachedSize.copy();
+            if (scheduleAutoTrim(event.getPlayer(), event.getPlayer().getPosition().copy(),
+                    event.getRotation().copy(), openingSize, false, true)) {
+                event.getPlayer().sendTextMessage("<color=#AAAAAA>Auto-trim checking window geometry...</color>");
+                debug("Auto-trim scheduled for construction type " + constructionTypeId
+                        + " placed by " + event.getPlayer().getName());
             }
         }
     }
@@ -376,11 +422,21 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     @EventMethod public void onHitConstruction(PlayerHitConstructionEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
 
     @EventMethod public void onPlaceObject(PlayerPlaceObjectEvent event) {
-        protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        Vector3i playerChunk = event.getPlayer().getChunkPosition();
+        protectOwnedLand(event, playerChunk.x, playerChunk.z);
         if (!event.isCancelled() && isStorage(event.getObjectDefinition())) {
             Claim claim = claims.getClaim(event.getChunkPositionX(), event.getChunkPositionZ()).orElse(null);
             if (claim != null) chests.assign(event.getGlobalID(), event.getChunkPositionX(),
                     event.getChunkPositionY(), event.getChunkPositionZ(), claim.ownerUid(), claim.ownerName());
+        }
+        if (!event.isCancelled() && isWindowObject(event.getObjectDefinition())) {
+            Vector3f openingSize = event.getObjectDefinition().boundscale == null
+                    ? new Vector3f(1.2f, 2.1f, 0.25f)
+                    : event.getObjectDefinition().boundscale.mult(event.getScale());
+            if (scheduleAutoTrim(event.getPlayer(), event.getPosition().copy(), event.getRotation().copy(),
+                    openingSize, false, false)) {
+                event.getPlayer().sendTextMessage("<color=#AAAAAA>Auto-trim checking window geometry...</color>");
+            }
         }
     }
     @EventMethod public void onDestroyObject(PlayerDestroyObjectEvent event) {
@@ -414,7 +470,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         ChestOwnership ownership = getOrAssignChest(event.getGlobalID(), event.getChunkPositionX(),
                 event.getChunkPositionY(), event.getChunkPositionZ());
         if (ownership == null || !ownership.locked()) return;
-        String identity = activeClaimIdentities.get(event.getPlayer().getUID());
+        String identity = activeClaimIdentity(event.getPlayer());
         if (ownership.ownerUid().equals(identity)
                 || (isClaimAdmin(event.getPlayer()) && claimAdminOverrideEnabled)) return;
         event.setCancelled(true);
@@ -425,12 +481,13 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     @EventMethod public void onPlaceVegetation(PlayerPlaceVegetationEvent event) {
         Player player = event.getPlayer();
         Item seed = player.getEquippedItem();
-        EquippedItemSnapshot snapshot = seed != null && seed.isValid()
-                ? new EquippedItemSnapshot(seed.getTypeID(), seed.getVariant())
-                : lastEquippedItems.get(player.getUID());
+        short seedType = seed != null && seed.isValid() ? seed.getTypeID()
+                : lastEquippedItemTypes.getOrDefault(player.getUID(), (short) -1);
+        int seedVariant = seed != null && seed.isValid() ? seed.getVariant()
+                : lastEquippedItemVariants.getOrDefault(player.getUID(), 0);
         protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ());
         if (event.isCancelled() && !player.isCreativeModeEnabled()) {
-            refundConsumedItemAfterPlacement(player, snapshot);
+            refundConsumedItemAfterPlacement(player, seedType, seedVariant);
         }
     }
     @EventMethod public void onCreativePlaceVegetation(PlayerCreativePlaceVegetationEvent event) { protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
@@ -466,7 +523,29 @@ public final class RisingWorldStarter extends Plugin implements Listener {
             for (int z = minZ; z <= maxZ && !event.isCancelled(); z++) protectOwnedLand(event, x, z);
         }
     }
-    @EventMethod public void onPlaceItem(PlayerPlaceItemEvent event) { protectOwnedLand(event, event.getPosition()); }
+    @EventMethod public void onPlaceItem(PlayerPlaceItemEvent event) {
+        Vector3i playerChunk = event.getPlayer().getChunkPosition();
+        protectOwnedLand(event, playerChunk.x, playerChunk.z);
+        if (event.isCancelled()) return;
+        Item inventoryItem = event.getInventoryItem();
+        if (inventoryItem instanceof Item.ConstructionItem constructionItem) {
+            Constructions.ConstructionDefinition definition = constructionItem.getConstructionDefinition();
+            String name = constructionItem.getConstructionName();
+            boolean window = (definition != null && definition.type == Constructions.Type.Window)
+                    || (name != null && name.toLowerCase(Locale.US).startsWith("window"));
+            if (window) {
+                Vector3f size = constructionItem.getSize() == null
+                        ? event.getScale().copy() : constructionItem.getSize().copy();
+                if (scheduleAutoTrim(event.getPlayer(), event.getPlayer().getPosition().copy(),
+                        event.getRotation().copy(), size, false, true)) {
+                    event.getPlayer().sendTextMessage("<color=#AAAAAA>Auto-trim checking window item "
+                            + name + "...</color>");
+                    debug("Auto-trim scheduled from PlayerPlaceItemEvent for " + name + " (construction "
+                            + Byte.toUnsignedInt(constructionItem.getConstructionID()) + ")");
+                }
+            }
+        }
+    }
 
     @EventMethod
     public void onInventoryAddItem(PlayerInventoryAddItemEvent event) {
@@ -491,6 +570,13 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         protect(event, chunk.x, chunk.z);
     }
 
+    private static Vector3f toWorldPosition(int chunkX, int chunkY, int chunkZ,
+                                            Vector3f localPosition) {
+        Vector3f chunkOrigin = Utils.ChunkUtils.getGlobalPosition(
+                new Vector3i(chunkX, chunkY, chunkZ), Vector3i.ZERO);
+        return chunkOrigin.add(localPosition);
+    }
+
     private void protectOwnedLand(Cancellable event, Vector3f position) {
         Vector3i chunk = Utils.ChunkUtils.getChunkPosition(position);
         protectOwnedLand(event, chunk.x, chunk.z);
@@ -500,8 +586,8 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         protect(event, chunkX, chunkZ, true);
     }
 
-    private void refundConsumedItemAfterPlacement(Player player, EquippedItemSnapshot snapshot) {
-        if (snapshot == null) {
+    private void refundConsumedItemAfterPlacement(Player player, short typeId, int variant) {
+        if (typeId < 0) {
             debug("Could not identify the consumed item for denied placement by " + player.getName());
             return;
         }
@@ -509,9 +595,9 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         // cancellable world event returns. Reconcile after that transaction.
         executeDelayed(0.15f, () -> {
             if (!player.isSpawned()) return;
-            player.getInventory().addItem(snapshot.typeId(), snapshot.variant(), 1);
+            player.getInventory().addItem(typeId, variant, 1);
             player.getInventory().syncWithClient();
-            debug("Refunded denied planting item " + snapshot.typeId() + ":" + snapshot.variant()
+            debug("Refunded denied planting item " + typeId + ":" + variant
                     + " to " + player.getName());
         });
     }
@@ -527,15 +613,22 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         if (claim == null) {
             if (!requiresOwnedLand) return;
             event.setCancelled(true);
+            debug("Denied " + event.getClass().getSimpleName() + " for " + player.getName()
+                    + " in unclaimed chunk " + chunkX + "," + chunkZ);
             sendClaimProtectionNotice(player,
-                    "Claim this chunk before placing items or modifying terrain.");
+                    "Claim chunk " + chunkX + ", " + chunkZ
+                            + " before placing items or modifying terrain. ["
+                            + event.getClass().getSimpleName() + "]");
             return;
         }
-        String activeClaimIdentity = activeClaimIdentities.get(player.getUID());
+        String activeClaimIdentity = activeClaimIdentity(player);
         boolean isOwner = claim.ownerUid().equals(activeClaimIdentity);
         if (isOwner || (isClaimAdmin(player) && claimAdminOverrideEnabled)) return;
 
         event.setCancelled(true);
+        debug("Denied " + event.getClass().getSimpleName() + " for " + player.getName()
+                + " in chunk " + chunkX + "," + chunkZ + ": active claim identity="
+                + activeClaimIdentity + ", owner=" + claim.ownerUid());
         sendClaimProtectionNotice(player, "This chunk is protected by " + claim.ownerName() + ".");
     }
 
@@ -647,7 +740,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                 player.sendTextMessage("<color=#FFAA66>This chest is not inside a claimed chunk.</color>");
                 return;
             }
-            boolean ownsChest = ownership.ownerUid().equals(activeClaimIdentities.get(player.getUID()));
+            boolean ownsChest = ownership.ownerUid().equals(activeClaimIdentity(player));
             boolean adminCanManage = isClaimAdmin(player) && claimAdminOverrideEnabled;
             if (!ownsChest && !adminCanManage) {
                 player.sendTextMessage("<color=#FF7777>This chest belongs to "
@@ -681,6 +774,294 @@ public final class RisingWorldStarter extends Plugin implements Listener {
 
     private static boolean isStorage(net.risingworld.api.definitions.Objects.ObjectDefinition definition) {
         return definition != null && definition.type == net.risingworld.api.definitions.Objects.Type.Storage;
+    }
+
+    private static boolean isWindowObject(net.risingworld.api.definitions.Objects.ObjectDefinition definition) {
+        if (definition == null) return false;
+        return definition.name != null
+                && definition.name.toLowerCase(Locale.US).contains("window");
+    }
+
+    private boolean scheduleAutoTrim(Player player, Vector3f position, Quaternion rotation,
+                                     Vector3f placedSize, boolean door, boolean useRaycast) {
+        long now = System.currentTimeMillis();
+        Long previous = autoTrimScheduledAt.put(player.getUID(), now);
+        if (previous != null && now - previous < 3000L) return false;
+        Vector3f openingSize = door
+                ? new Vector3f(Math.max(1.2f, placedSize.x), Math.max(2.15f, placedSize.y), 0.35f)
+                : new Vector3f(
+                        placedSize.x > 0.05f ? placedSize.x : 2.0f,
+                        placedSize.y > 0.05f ? placedSize.y : 2.0f,
+                        placedSize.z > 0.02f ? placedSize.z : 0.2f);
+        executeDelayed(0.2f, () -> {
+            if (!player.isSpawned()) return;
+            player.raycast(8f, -1, false, result -> {
+                Vector3f resolvedPosition = position;
+                if (useRaycast && result != null && result.hasCollision()) {
+                    // Construction object positions are chunk-local in this API
+                    // path. The physics collision point is a true world-space
+                    // coordinate and reliably identifies the surrounding wall.
+                    resolvedPosition = result.getCollisionPoint();
+                }
+                finishAutoTrim(player, resolvedPosition, rotation, openingSize, door);
+            });
+        });
+        return true;
+    }
+
+    private void finishAutoTrim(Player player, Vector3f position, Quaternion rotation,
+                                Vector3f openingSize, boolean door) {
+            if (!door) {
+                ConstructionElement placedWindow = findNearestWindow(position);
+                if (placedWindow != null) {
+                    position = placedWindow.getWorldPosition().copy();
+                    rotation = placedWindow.getRotation().copy();
+                    Vector3f actualSize = placedWindow.getScale();
+                    if (actualSize != null && actualSize.x > 0.05f
+                            && actualSize.y > 0.05f && actualSize.z > 0.02f) {
+                        openingSize = actualSize.copy();
+                    }
+                    debug("Auto-trim resolved placed window " + placedWindow.getGlobalID()
+                            + " at " + position + " with size " + openingSize);
+                }
+            }
+            int carved = carveTerrainOpening(position, rotation, openingSize, door);
+            int[] constructionStats = new int[3];
+            int constructionBlocks = carved == 0
+                    ? autoTrimOpening(position, rotation, openingSize, door, constructionStats) : 0;
+            int total = carved + constructionBlocks;
+            if (total > 0) {
+                player.sendTextMessage("<color=#77FF99>Auto-trimmed " + total
+                        + " wall block" + (total == 1 ? "" : "s") + " around the "
+                        + (door ? "door" : "window") + ".</color>");
+            } else {
+                Vector3i chunk = Utils.ChunkUtils.getChunkPosition(position);
+                player.sendTextMessage("<color=#FFAA66>Auto-trim diagnostic: chunk "
+                        + chunk.x + "," + chunk.z + "; no terrain or construction blocks intersected"
+                        + " (scanned " + constructionStats[0] + ", rectangular "
+                        + constructionStats[1] + "); opening "
+                        + String.format(Locale.US, "%.2f x %.2f x %.2f",
+                        openingSize.x, openingSize.y, openingSize.z) + ".</color>");
+            }
+    }
+
+    private ConstructionElement findNearestWindow(Vector3f nearPosition) {
+        Vector3i centerChunk = Utils.ChunkUtils.getChunkPosition(nearPosition);
+        ConstructionElement nearest = null;
+        float nearestDistanceSquared = 25f;
+        for (int chunkX = centerChunk.x - 1; chunkX <= centerChunk.x + 1; chunkX++) {
+            for (int chunkZ = centerChunk.z - 1; chunkZ <= centerChunk.z + 1; chunkZ++) {
+                var chunk = World.getChunk(chunkX, chunkZ);
+                if (chunk == null || !chunk.isValid()) continue;
+                ConstructionElement[] elements = chunk.getAllConstructionElements();
+                if (elements == null) continue;
+                for (ConstructionElement element : elements) {
+                    if (element == null || !element.isValid()) continue;
+                    Constructions.ConstructionDefinition definition =
+                            Definitions.getConstructionDefinition(element.getTypeID());
+                    if (definition == null || definition.type != Constructions.Type.Window) continue;
+                    Vector3f candidate = element.getWorldPosition();
+                    float dx = candidate.x - nearPosition.x;
+                    float dy = candidate.y - nearPosition.y;
+                    float dz = candidate.z - nearPosition.z;
+                    float distanceSquared = dx * dx + dy * dy + dz * dz;
+                    if (distanceSquared < nearestDistanceSquared) {
+                        nearestDistanceSquared = distanceSquared;
+                        nearest = element;
+                    }
+                }
+            }
+        }
+        return nearest;
+    }
+
+    private int carveTerrainOpening(Vector3f center, Quaternion rotation,
+                                    Vector3f openingSize, boolean door) {
+        float width = Math.max(openingSize.x, openingSize.z);
+        float height = openingSize.y;
+        Vector3f widthAxis = rotation.mult(Vector3f.RIGHT).normalize();
+        Vector3f normalAxis = rotation.mult(Vector3f.FORWARD).normalize();
+        Set<String> editedBlocks = new HashSet<>();
+        int carved = 0;
+        for (float widthOffset = -width * 0.5f + 0.25f;
+             widthOffset < width * 0.5f; widthOffset += 0.5f) {
+            for (float heightOffset = -height * 0.5f + 0.25f;
+                 heightOffset < height * 0.5f; heightOffset += 0.5f) {
+                for (float depthOffset = -0.5f; depthOffset <= 0.5f; depthOffset += 0.25f) {
+                    Vector3f sample = center.add(widthAxis.mult(widthOffset))
+                            .add(Vector3f.UP.mult(heightOffset)).add(normalAxis.mult(depthOffset));
+                    Vector3i chunk = new Vector3i();
+                    Vector3i block = new Vector3i();
+                    Utils.ChunkUtils.getChunkAndBlockPosition(sample, chunk, block);
+                    String key = chunk.x + "," + chunk.y + "," + chunk.z + ":"
+                            + block.x + "," + block.y + "," + block.z;
+                    if (!editedBlocks.add(key)) continue;
+                    var chunkPart = World.getChunkPart(chunk.x, chunk.y, chunk.z);
+                    if (chunkPart == null || !chunkPart.isValid()
+                            || chunkPart.getTerrainID(block.x, block.y, block.z) == 0) continue;
+                    World.setTerrainData(0, chunk.x, chunk.y, chunk.z,
+                            block.x, block.y, block.z,
+                            net.risingworld.api.world.EditRestriction.SolidOnly);
+                    carved++;
+                }
+            }
+        }
+        debug("Auto-trim terrain carve at " + center + ": removed " + carved
+                + " solid blocks from " + editedBlocks.size() + " sampled cells");
+        return carved;
+    }
+
+    private int autoTrimOpening(Vector3f openingPosition, Quaternion openingRotation,
+                                Vector3f openingSize, boolean door, int[] stats) {
+        Vector3i openingChunk = Utils.ChunkUtils.getChunkPosition(openingPosition);
+        int trimmed = 0;
+        int scanned = 0;
+        int compatible = 0;
+        List<ConstructionElement> intersecting = new ArrayList<>();
+        for (int chunkX = openingChunk.x - 1; chunkX <= openingChunk.x + 1; chunkX++) {
+            for (int chunkZ = openingChunk.z - 1; chunkZ <= openingChunk.z + 1; chunkZ++) {
+                var chunk = World.getChunk(chunkX, chunkZ);
+                if (chunk == null || !chunk.isValid()) continue;
+                ConstructionElement[] elements = chunk.getAllConstructionElements();
+                if (elements == null) continue;
+                for (ConstructionElement wall : elements) {
+                    scanned++;
+                    if (intersecting.size() >= 64 || !isAutoTrimWall(wall)) continue;
+                    compatible++;
+                    if (trimWallElement(wall, openingPosition, openingRotation, openingSize,
+                            door, 0)) intersecting.add(wall);
+                }
+            }
+        }
+        // Split every intersecting element, including walls assembled from
+        // several panels. The opening is now resolved from the placed window's
+        // true center, so whole-panel deletion is no longer necessary.
+        int trimMode = 1;
+        for (ConstructionElement wall : intersecting) {
+            if (trimWallElement(wall, openingPosition, openingRotation, openingSize,
+                    door, trimMode)) {
+                trimmed++;
+                stats[2]++;
+            }
+        }
+        debug("Auto-trim at " + openingPosition + " in chunk " + openingChunk.x + ","
+                + openingChunk.z + ": scanned=" + scanned + ", rectangular candidates="
+                + compatible + ", trimmed=" + trimmed + ", opening size=" + openingSize);
+        stats[0] = scanned;
+        stats[1] = compatible;
+        return trimmed;
+    }
+
+    private static boolean isAutoTrimWall(ConstructionElement element) {
+        if (element == null || !element.isValid()) return false;
+        Constructions.ConstructionDefinition definition = Definitions.getConstructionDefinition(element.getTypeID());
+        if (definition == null || definition.type == Constructions.Type.Window
+                || definition.shapetype != Constructions.ShapeType.Default) return false;
+        Vector3f size = constructionWorldSize(element, definition);
+        return size != null && size.y >= 0.25f && Math.max(size.x, size.z) >= 0.25f
+                && Math.min(size.x, size.z) <= 1.0f;
+    }
+
+    private static Vector3f constructionWorldSize(ConstructionElement element,
+                                                   Constructions.ConstructionDefinition definition) {
+        Vector3f scale = element.getScale();
+        // For placed construction blocks Rising World exposes the effective
+        // dimensions through getScale(). startsize describes the selector's
+        // initial held size and must not be applied again here.
+        return scale == null ? null : scale.copy();
+    }
+
+    private boolean trimWallElement(ConstructionElement wall, Vector3f openingPosition,
+                                    Quaternion openingRotation, Vector3f openingSize,
+                                    boolean door, int mode) {
+        Constructions.ConstructionDefinition definition = Definitions.getConstructionDefinition(wall.getTypeID());
+        if (definition == null) return false;
+        Vector3f wallSize = constructionWorldSize(wall, definition);
+        if (wallSize == null) return false;
+        Quaternion wallRotation = wall.getRotation().copy();
+        boolean widthIsX = wallSize.x >= wallSize.z;
+        float wallWidth = widthIsX ? wallSize.x : wallSize.z;
+        float wallThickness = widthIsX ? wallSize.z : wallSize.x;
+        float openingWidth = Math.max(openingSize.x, openingSize.z);
+        float openingHeight = openingSize.y;
+        if (openingWidth <= 0.05f || openingHeight <= 0.05f) return false;
+
+        Vector3f local = wallRotation.inverse().mult(openingPosition.subtract(wall.getWorldPosition()));
+        float localWidth = widthIsX ? local.x : local.z;
+        float localDepth = widthIsX ? local.z : local.x;
+        if (Math.abs(localDepth) > wallThickness * 0.5f + 0.45f) return false;
+
+        float wallMinW = -wallWidth * 0.5f;
+        float wallMaxW = wallWidth * 0.5f;
+        float wallMinY = -wallSize.y * 0.5f;
+        float wallMaxY = wallSize.y * 0.5f;
+        // Leave a small overlap behind the frame so floating-point placement
+        // and texture edges cannot expose daylight seams around the opening.
+        float frameOverlap = 0.06f;
+        float openingMinW = Math.max(wallMinW, localWidth - openingWidth * 0.5f + frameOverlap);
+        float openingMaxW = Math.min(wallMaxW, localWidth + openingWidth * 0.5f - frameOverlap);
+        float openingMinY = Math.max(wallMinY, local.y - openingHeight * 0.5f + frameOverlap);
+        float openingMaxY = Math.min(wallMaxY, local.y + openingHeight * 0.5f - frameOverlap);
+        if (door && openingMinY - wallMinY < 0.30f) openingMinY = wallMinY;
+        if (openingMaxW - openingMinW < 0.08f || openingMaxY - openingMinY < 0.08f) return false;
+
+        // Detection pass: gather all intersections before deciding whether this
+        // is one large panel or a wall assembled from several smaller panels.
+        if (mode == 0) return true;
+
+        if (mode == 2) {
+            wall.setScale(0.001f, 0.001f, 0.001f);
+            wall.destroy(true);
+            return true;
+        }
+
+        List<float[]> pieces = new ArrayList<>(4);
+        addTrimPiece(pieces, wallMinW, openingMinW, wallMinY, wallMaxY);
+        addTrimPiece(pieces, openingMaxW, wallMaxW, wallMinY, wallMaxY);
+        addTrimPiece(pieces, openingMinW, openingMaxW, wallMinY, openingMinY);
+        addTrimPiece(pieces, openingMinW, openingMaxW, openingMaxY, wallMaxY);
+        for (float[] piece : pieces) {
+            createTrimPiece(wall, wallRotation, wallSize, widthIsX, piece, wallThickness);
+        }
+
+        // Collapsing first is required to invalidate the old rendered mesh on
+        // clients before the original element is silently removed.
+        wall.setScale(0.001f, 0.001f, 0.001f);
+        wall.destroy(true);
+        return true;
+    }
+
+    private static void addTrimPiece(List<float[]> pieces, float minW, float maxW,
+                                     float minY, float maxY) {
+        if (maxW - minW >= 0.08f && maxY - minY >= 0.08f) {
+            pieces.add(new float[] {(minW + maxW) * 0.5f, (minY + maxY) * 0.5f,
+                    maxW - minW, maxY - minY});
+        }
+    }
+
+    private void createTrimPiece(ConstructionElement source, Quaternion rotation,
+                                 Vector3f sourceWorldSize, boolean widthIsX,
+                                 float[] piece, float thickness) {
+        Vector3f sourceScale = source.getScale();
+        if (sourceScale == null) return;
+        Vector3f localOffset = widthIsX
+                ? new Vector3f(piece[0], piece[1], 0f)
+                : new Vector3f(0f, piece[1], piece[0]);
+        Vector3f position = source.getWorldPosition().add(rotation.mult(localOffset));
+        Vector3f pieceWorldSize = widthIsX
+                ? new Vector3f(piece[2], piece[3], thickness)
+                : new Vector3f(thickness, piece[3], piece[2]);
+        Vector3f scale = new Vector3f(
+                sourceScale.x * pieceWorldSize.x / sourceWorldSize.x,
+                sourceScale.y * pieceWorldSize.y / sourceWorldSize.y,
+                sourceScale.z * pieceWorldSize.z / sourceWorldSize.z);
+        ConstructionElement created = World.createConstructionElement(source.getTypeID(), source.getTexture(),
+                source.getTextureScale(), source.getColor(), position, rotation.copy(), scale,
+                source.getSurfaceOffset(), source.getSurfaceScale());
+        if (created != null) {
+            created.setPlayerDbID(source.getPlayerDbID());
+            created.setStrength(source.getStrength());
+        }
     }
 
     private void listOwnedChunks(Player player) {
@@ -1226,7 +1607,11 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         clearClaimVisuals(player);
         claimProtectionNotices.remove(playerUid);
         deniedGrassRewardsUntil.remove(playerUid);
-        lastEquippedItems.remove(playerUid);
+        lastEquippedItemTypes.remove(playerUid);
+        lastEquippedItemVariants.remove(playerUid);
+        lastEquippedConstructionNames.remove(playerUid);
+        lastEquippedConstructionIds.remove(playerUid);
+        lastEquippedConstructionSizes.remove(playerUid);
         try {
             characterService.loadCharacter(player, character);
         } catch (RuntimeException exception) {
@@ -1253,6 +1638,14 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         CharacterService.CharacterSummary character = activeCharacters.get(player.getUID());
         if (character == null) throw new IllegalStateException("No active character for " + player.getUID());
         return character.economyKey();
+    }
+
+    private String activeClaimIdentity(Player player) {
+        CharacterService.CharacterSummary character = activeCharacters.get(player.getUID());
+        if (character == null) return null;
+        String identity = character.economyKey();
+        activeClaimIdentities.put(player.getUID(), identity);
+        return identity;
     }
 
     private void saveActiveCharacters() {
@@ -2102,9 +2495,6 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     }
 
     private record CartLine(StoreCatalog.StoreItem item, int quantity) {
-    }
-
-    private record EquippedItemSnapshot(short typeId, int variant) {
     }
 
     private record AdminView(UIElement window, UILabel closeButton, UILabel refreshButton,

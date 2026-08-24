@@ -248,6 +248,14 @@ server and claim administrators can also open and manage them. Chest ownership
 and lock state are stored in the world's `chests.properties` file and removed
 when the chest is destroyed.
 
+### Automatic door and window trim
+
+Placing a door or window into a solid block wall automatically removes the block
+cells intersecting the opening. The frame remains in place and the surrounding
+wall blocks are left unchanged. The carve follows the placed frame's horizontal
+rotation and uses Rising World's solid-terrain restriction so air, water, and
+unrelated non-block elements are not modified.
+
 ## World and server isolation
 
 Characters, inventories, balances, claims, and administrator assignments are
