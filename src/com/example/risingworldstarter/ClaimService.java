@@ -10,6 +10,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
@@ -25,6 +26,20 @@ final class ClaimService {
 
     synchronized Optional<Claim> getClaim(int chunkX, int chunkZ) {
         return Optional.ofNullable(claims.get(key(chunkX, chunkZ)));
+    }
+
+    synchronized List<ClaimedChunk> getClaimsByOwner(String ownerUid) {
+        return claims.entrySet().stream()
+                .filter(entry -> entry.getValue().ownerUid().equals(ownerUid))
+                .map(entry -> {
+                    String[] coordinates = entry.getKey().split(",", 2);
+                    return new ClaimedChunk(Integer.parseInt(coordinates[0]), Integer.parseInt(coordinates[1]));
+                })
+                .sorted((left, right) -> {
+                    int xComparison = Integer.compare(left.x(), right.x());
+                    return xComparison != 0 ? xComparison : Integer.compare(left.z(), right.z());
+                })
+                .toList();
     }
 
     synchronized boolean claim(int chunkX, int chunkZ, String ownerUid, String ownerName) {

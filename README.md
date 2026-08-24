@@ -54,7 +54,15 @@ Players see their current balance on the HUD after spawning. They can also use
 `/balance` or `/bal` in chat to print the balance and refresh the HUD.
 
 Balances are stored as integer minor units (cents) in
-`Plugins/RisingWorldStarter/balances.properties`; new players start at `$0.00`.
+`Plugins/RisingWorldStarter/balances.properties`. New players start with
+`$25,000.00`, and claiming a chunk costs `$10,000.00`.
+
+Both values can be changed in the generated `economy.properties` file:
+
+```properties
+default-balance=25000.00
+claim-cost=10000.00
+```
 Other plugins can access the API through the loaded plugin instance:
 
 ```java
@@ -74,12 +82,14 @@ Land ownership is stored by horizontal chunk in
 
 - `/claim` claims the chunk where you are standing.
 - `/chunk` reports the current chunk coordinates and owner, and draws its boundary.
+- `/claims` lists all chunks you own and toggles blue squares over all of them.
 - `/unclaim` releases your current chunk.
 - Running `/chunk` again while viewing the same chunk hides its boundary.
 
 The boundary is green for unclaimed land, blue for your land, and red for land
 claimed by another player. Running `/chunk` again moves the visualization to the
-new current chunk.
+new current chunk. Claim-square X/Z positions remain fixed while their vertical
+position follows the viewing player.
 
 Server administrators can manage a persistent claim-administrator whitelist:
 

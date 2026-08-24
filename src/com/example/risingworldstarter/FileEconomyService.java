@@ -21,6 +21,19 @@ final class FileEconomyService implements EconomyApi {
     }
 
     @Override
+    public synchronized long createAccount(String playerUid, long initialBalance) {
+        requireNonNegative(initialBalance, "initialBalance");
+        String uid = requireUid(playerUid);
+        Long existing = balances.get(uid);
+        if (existing != null) {
+            return existing;
+        }
+        balances.put(uid, initialBalance);
+        save();
+        return initialBalance;
+    }
+
+    @Override
     public synchronized long getBalance(String playerUid) {
         return balances.getOrDefault(requireUid(playerUid), 0L);
     }

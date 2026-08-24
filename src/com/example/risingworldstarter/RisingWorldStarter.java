@@ -5,6 +5,7 @@ import net.risingworld.api.Server;
 import net.risingworld.api.events.EventMethod;
 import net.risingworld.api.events.Listener;
 import net.risingworld.api.events.player.PlayerCommandEvent;
+import net.risingworld.api.events.player.PlayerChangePositionEvent;
 import net.risingworld.api.events.player.PlayerDisconnectEvent;
 import net.risingworld.api.events.player.PlayerSpawnEvent;
 import net.risingworld.api.objects.Player;
@@ -16,10 +17,13 @@ import net.risingworld.api.utils.Utils;
 import net.risingworld.api.utils.Vector3f;
 import net.risingworld.api.utils.Vector3i;
 import net.risingworld.api.worldelements.Area3D;
+import net.risingworld.api.worldelements.GameObject;
 
 import java.nio.file.Path;
 import java.text.NumberFormat;
 import java.util.Locale;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -28,17 +32,20 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class RisingWorldStarter extends Plugin implements Listener {
     private final Map<String, UILabel> balanceLabels = new ConcurrentHashMap<>();
-    private final Map<String, Area3D> chunkVisuals = new ConcurrentHashMap<>();
-    private final Map<String, String> viewedChunks = new ConcurrentHashMap<>();
+    private final Map<String, List<Area3D>> claimVisuals = new ConcurrentHashMap<>();
+    private final Map<String, String> visualModes = new ConcurrentHashMap<>();
+    private final Map<String, Float> visualHeights = new ConcurrentHashMap<>();
     private EconomyApi economy;
     private ClaimService claims;
     private ClaimAdminService claimAdmins;
+    private EconomySettings economySettings;
 
     @Override
     public void onEnable() {
         economy = new FileEconomyService(Path.of(getPath(), "balances.properties"));
         claims = new ClaimService(Path.of(getPath(), "claims.properties"));
         claimAdmins = new ClaimAdminService(Path.of(getPath(), "claim-admins.properties"));
+        economySettings = EconomySettings.load(Path.of(getPath(), "economy.properties"));
         registerEventListener(this);
         System.out.println("[RisingWorldStarter] Enabled on Rising World " + getGameVersion());
     }
@@ -46,8 +53,9 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     @Override
     public void onDisable() {
         balanceLabels.clear();
-        chunkVisuals.clear();
-        viewedChunks.clear();
+        claimVisuals.clear();
+        visualModes.clear();
+        visualHeights.clear();
         System.out.println("[RisingWorldStarter] Disabled");
     }
 
@@ -61,14 +69,41 @@ public final class RisingWorldStarter extends Plugin implements Listener {
 
     @EventMethod
     public void onPlayerSpawn(PlayerSpawnEvent event) {
+        economy.createAccount(event.getPlayer().getUID(), economySettings.defaultBalance());
         showBalance(event.getPlayer());
     }
 
     @EventMethod
     public void onPlayerDisconnect(PlayerDisconnectEvent event) {
         balanceLabels.remove(event.getPlayer().getUID());
-        chunkVisuals.remove(event.getPlayer().getUID());
-        viewedChunks.remove(event.getPlayer().getUID());
+        claimVisuals.remove(event.getPlayer().getUID());
+        visualModes.remove(event.getPlayer().getUID());
+        visualHeights.remove(event.getPlayer().getUID());
+    }
+
+    @EventMethod
+    public void onPlayerChangePosition(PlayerChangePositionEvent event) {
+        Player player = event.getPlayer();
+        List<Area3D> visuals = claimVisuals.get(player.getUID());
+        if (visuals == null || visuals.isEmpty()) {
+            return;
+        }
+
+        float newGroundY = event.getPosition().y - 0.15f;
+        Float oldGroundY = visualHeights.get(player.getUID());
+        if (oldGroundY != null && Math.abs(newGroundY - oldGroundY) < 0.1f) {
+            return;
+        }
+
+        for (Area3D visual : visuals) {
+            Area area = visual.getArea();
+            Vector3f start = area.getStartPosition();
+            Vector3f end = area.getEndPosition();
+            area.setStartPosition(new Vector3f(start.x, newGroundY, start.z));
+            area.setEndPosition(new Vector3f(end.x, newGroundY + 0.3f, end.z));
+            visual.updateCoordinates();
+        }
+        visualHeights.put(player.getUID(), newGroundY);
     }
 
     @EventMethod
@@ -90,10 +125,59 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         } else if (command.equalsIgnoreCase("/chunk")) {
             event.setCancelled(true);
             showCurrentChunk(event.getPlayer(), true);
+        } else if (command.equalsIgnoreCase("/claims")) {
+            event.setCancelled(true);
+            listOwnedChunks(event.getPlayer());
         } else if (command.equalsIgnoreCase("/claimadmin")) {
             event.setCancelled(true);
             handleClaimAdminCommand(event.getPlayer(), parts);
         }
+    }
+
+    private void listOwnedChunks(Player player) {
+        List<ClaimedChunk> ownedChunks = claims.getClaimsByOwner(player.getUID());
+        if ("claims".equals(visualModes.get(player.getUID()))) {
+            clearClaimVisuals(player);
+            player.sendTextMessage("<color=#AAAAAA>Claim overview hidden.</color>");
+            return;
+        }
+        if (ownedChunks.isEmpty()) {
+            clearClaimVisuals(player);
+            player.sendTextMessage("<color=#AAAAAA>You do not own any chunks.</color>");
+            return;
+        }
+
+        player.sendTextMessage("<color=#E8C547>Your claimed chunks (" + ownedChunks.size() + "):</color>");
+        StringBuilder line = new StringBuilder();
+        for (ClaimedChunk chunk : ownedChunks) {
+            String coordinate = "[" + chunk.x() + ", " + chunk.z() + "]";
+            if (!line.isEmpty() && line.length() + coordinate.length() + 2 > 90) {
+                player.sendTextMessage(line.toString());
+                line.setLength(0);
+            }
+            if (!line.isEmpty()) {
+                line.append(", ");
+            }
+            line.append(coordinate);
+        }
+        if (!line.isEmpty()) {
+            player.sendTextMessage(line.toString());
+        }
+
+        clearClaimVisuals(player);
+        float groundY = player.getPosition().y - 0.15f;
+        List<Area3D> visuals = new ArrayList<>(ownedChunks.size());
+        for (ClaimedChunk chunk : ownedChunks) {
+            Area3D visual = createChunkVisual(chunk.x(), chunk.z(), groundY,
+                    0.15f, 0.45f, 1.0f, 0.12f,
+                    0.30f, 0.65f, 1.0f, 0.95f);
+            visuals.add(visual);
+            player.addGameObject(visual);
+        }
+        claimVisuals.put(player.getUID(), visuals);
+        visualModes.put(player.getUID(), "claims");
+        visualHeights.put(player.getUID(), groundY);
+        player.sendTextMessage("<color=#77AAFF>Showing all owned claim squares. Use /claims again to hide them.</color>");
     }
 
     private void claimCurrentChunk(Player player) {
@@ -107,8 +191,31 @@ public final class RisingWorldStarter extends Plugin implements Listener {
             return;
         }
 
-        claims.claim(chunk.x, chunk.z, player.getUID(), player.getName());
-        player.sendTextMessage("<color=#77FF99>Claimed chunk " + chunk.x + ", " + chunk.z + ".</color>");
+        long claimCost = economySettings.claimCost();
+        long balance = economy.getBalance(player.getUID());
+        if (balance < claimCost) {
+            player.sendTextMessage("<color=#FF7777>Claiming this chunk costs " + formatBalance(claimCost)
+                    + ". You only have " + formatBalance(balance) + ".</color>");
+            return;
+        }
+
+        if (!claims.claim(chunk.x, chunk.z, player.getUID(), player.getName())) {
+            player.sendTextMessage("<color=#FF7777>That chunk was claimed before your request completed.</color>");
+            return;
+        }
+        try {
+            if (!economy.withdraw(player.getUID(), claimCost)) {
+                claims.forceUnclaim(chunk.x, chunk.z);
+                player.sendTextMessage("<color=#FF7777>Your balance changed before payment completed.</color>");
+                return;
+            }
+        } catch (RuntimeException exception) {
+            claims.forceUnclaim(chunk.x, chunk.z);
+            throw exception;
+        }
+        updateBalanceLabel(player);
+        player.sendTextMessage("<color=#77FF99>Claimed chunk " + chunk.x + ", " + chunk.z
+                + " for " + formatBalance(claimCost) + ".</color>");
         showCurrentChunk(player, false);
     }
 
@@ -133,12 +240,10 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private void showCurrentChunk(Player player, boolean toggle) {
         Vector3i chunk = player.getChunkPosition();
         String chunkKey = chunk.x + "," + chunk.z;
-        Area3D oldVisual = chunkVisuals.remove(player.getUID());
-        String oldChunkKey = viewedChunks.remove(player.getUID());
-        if (oldVisual != null) {
-            player.removeGameObject(oldVisual);
-        }
-        if (toggle && chunkKey.equals(oldChunkKey)) {
+        String requestedMode = "chunk:" + chunkKey;
+        String oldMode = visualModes.get(player.getUID());
+        clearClaimVisuals(player);
+        if (toggle && requestedMode.equals(oldMode)) {
             player.sendTextMessage("<color=#AAAAAA>Chunk highlight hidden.</color>");
             return;
         }
@@ -148,28 +253,54 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         player.sendTextMessage("<color=#E8C547>Chunk:</color> " + chunk.x + ", " + chunk.z
                 + " - " + ownerText);
 
-        Vector3f start = Utils.ChunkUtils.getGlobalPosition(new Vector3i(chunk.x, 0, chunk.z), Vector3i.ZERO);
-        Vector3f end = Utils.ChunkUtils.getGlobalPosition(new Vector3i(chunk.x + 1, 0, chunk.z + 1), Vector3i.ZERO);
         float groundY = player.getPosition().y - 0.15f;
-        Area area = new Area(start.x, groundY, start.z, end.x, groundY + 0.3f, end.z);
-        Area3D visual = new Area3D(area);
-        visual.setAlwaysVisible(true);
-        visual.setFrameVisible(true);
-
+        Area3D visual;
         if (claim == null) {
-            visual.setColor(0.15f, 0.85f, 0.30f, 0.12f);
-            visual.setFrameColor(0.25f, 1.0f, 0.40f, 0.95f);
+            visual = createChunkVisual(chunk.x, chunk.z, groundY,
+                    0.15f, 0.85f, 0.30f, 0.12f,
+                    0.25f, 1.0f, 0.40f, 0.95f);
         } else if (claim.ownerUid().equals(player.getUID())) {
-            visual.setColor(0.15f, 0.45f, 1.0f, 0.12f);
-            visual.setFrameColor(0.30f, 0.65f, 1.0f, 0.95f);
+            visual = createChunkVisual(chunk.x, chunk.z, groundY,
+                    0.15f, 0.45f, 1.0f, 0.12f,
+                    0.30f, 0.65f, 1.0f, 0.95f);
         } else {
-            visual.setColor(1.0f, 0.15f, 0.15f, 0.12f);
-            visual.setFrameColor(1.0f, 0.30f, 0.30f, 0.95f);
+            visual = createChunkVisual(chunk.x, chunk.z, groundY,
+                    1.0f, 0.15f, 0.15f, 0.12f,
+                    1.0f, 0.30f, 0.30f, 0.95f);
         }
 
-        chunkVisuals.put(player.getUID(), visual);
-        viewedChunks.put(player.getUID(), chunkKey);
+        claimVisuals.put(player.getUID(), List.of(visual));
+        visualModes.put(player.getUID(), requestedMode);
+        visualHeights.put(player.getUID(), groundY);
         player.addGameObject(visual);
+    }
+
+    private Area3D createChunkVisual(int chunkX, int chunkZ, float groundY,
+                                     float red, float green, float blue, float alpha,
+                                     float frameRed, float frameGreen, float frameBlue, float frameAlpha) {
+        Vector3f start = Utils.ChunkUtils.getGlobalPosition(new Vector3i(chunkX, 0, chunkZ), Vector3i.ZERO);
+        Vector3f end = Utils.ChunkUtils.getGlobalPosition(new Vector3i(chunkX + 1, 0, chunkZ + 1), Vector3i.ZERO);
+        Area area = new Area(start.x, groundY, start.z, end.x, groundY + 0.3f, end.z);
+        Area3D visual = new Area3D(area);
+        // Keep the overlay in world space. A null attachment explicitly prevents
+        // the local transform from inheriting movement from the viewing player.
+        visual.attachTo((Player) null, GameObject.AttachTarget.Root);
+        visual.setAlwaysVisible(false);
+        visual.setFrameVisible(true);
+        visual.setColor(red, green, blue, alpha);
+        visual.setFrameColor(frameRed, frameGreen, frameBlue, frameAlpha);
+        return visual;
+    }
+
+    private void clearClaimVisuals(Player player) {
+        List<Area3D> visuals = claimVisuals.remove(player.getUID());
+        visualModes.remove(player.getUID());
+        visualHeights.remove(player.getUID());
+        if (visuals != null) {
+            for (Area3D visual : visuals) {
+                player.removeGameObject(visual);
+            }
+        }
     }
 
     private void handleClaimAdminCommand(Player sender, String[] parts) {
