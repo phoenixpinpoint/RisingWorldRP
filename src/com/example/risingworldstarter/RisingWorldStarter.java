@@ -6,13 +6,17 @@ import net.risingworld.api.Timer;
 import net.risingworld.api.World;
 import net.risingworld.api.events.EventMethod;
 import net.risingworld.api.events.Listener;
+import net.risingworld.api.events.Cancellable;
 import net.risingworld.api.events.general.SkipNightEvent;
 import net.risingworld.api.events.player.PlayerCommandEvent;
+import net.risingworld.api.events.player.PlayerChangeEquippedItemEvent;
 import net.risingworld.api.events.player.PlayerChangePositionEvent;
 import net.risingworld.api.events.player.PlayerDisconnectEvent;
 import net.risingworld.api.events.player.PlayerSpawnEvent;
 import net.risingworld.api.events.player.ui.PlayerUIElementClickEvent;
 import net.risingworld.api.events.player.ui.PlayerUITextFieldChangeEvent;
+import net.risingworld.api.events.player.inventory.PlayerInventoryAddItemEvent;
+import net.risingworld.api.events.player.world.*;
 import net.risingworld.api.assets.TextureAsset;
 import net.risingworld.api.definitions.Definitions;
 import net.risingworld.api.definitions.Items;
@@ -79,8 +83,12 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private final Map<String, StoreView> storeViews = new ConcurrentHashMap<>();
     private final Map<String, AdminView> adminViews = new ConcurrentHashMap<>();
     private final Map<String, CharacterService.CharacterSummary> activeCharacters = new ConcurrentHashMap<>();
+    private final Map<String, String> activeClaimIdentities = new ConcurrentHashMap<>();
     private final Map<String, CharacterSelectionView> characterSelectionViews = new ConcurrentHashMap<>();
     private final Map<String, AppearanceView> appearanceViews = new ConcurrentHashMap<>();
+    private final Map<String, Long> claimProtectionNotices = new ConcurrentHashMap<>();
+    private final Map<String, Long> deniedGrassRewardsUntil = new ConcurrentHashMap<>();
+    private final Map<String, EquippedItemSnapshot> lastEquippedItems = new ConcurrentHashMap<>();
     private EconomyApi economy;
     private ClaimService claims;
     private ClaimAdminService claimAdmins;
@@ -92,6 +100,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private Timer worldClockTimer;
     private Timer characterAutosaveTimer;
     private PayPeriod lastSalaryPeriod;
+    private volatile boolean claimAdminOverrideEnabled = false;
 
     @Override
     public void onEnable() {
@@ -246,8 +255,12 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         storeViews.clear();
         adminViews.clear();
         activeCharacters.clear();
+        activeClaimIdentities.clear();
         characterSelectionViews.clear();
         appearanceViews.clear();
+        claimProtectionNotices.clear();
+        deniedGrassRewardsUntil.clear();
+        lastEquippedItems.clear();
         storeCatalogLoaded = false;
         System.out.println("[RisingWorldStarter] Disabled");
     }
@@ -310,6 +323,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     @EventMethod
     public void onPlayerDisconnect(PlayerDisconnectEvent event) {
         CharacterService.CharacterSummary active = activeCharacters.remove(event.getPlayer().getUID());
+        activeClaimIdentities.remove(event.getPlayer().getUID());
         if (active != null) characterService.saveCharacter(event.getPlayer(), active);
         balanceLabels.remove(event.getPlayer().getUID());
         worldTimeLabels.remove(event.getPlayer().getUID());
@@ -320,6 +334,152 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         adminViews.remove(event.getPlayer().getUID());
         characterSelectionViews.remove(event.getPlayer().getUID());
         appearanceViews.remove(event.getPlayer().getUID());
+        claimProtectionNotices.remove(event.getPlayer().getUID());
+        deniedGrassRewardsUntil.remove(event.getPlayer().getUID());
+        lastEquippedItems.remove(event.getPlayer().getUID());
+    }
+
+    @EventMethod
+    public void onPlayerChangeEquippedItem(PlayerChangeEquippedItemEvent event) {
+        Item item = event.getItem();
+        // Keep the last real item when the final unit disappears; the native
+        // planting transaction may unequip it before its placement event fires.
+        if (item != null && item.isValid()) {
+            lastEquippedItems.put(event.getPlayer().getUID(),
+                    new EquippedItemSnapshot(item.getTypeID(), item.getVariant()));
+        }
+    }
+
+    /* Claim protection uses the chunk reported by the affected world element,
+       rather than the chunk in which the player happens to be standing. */
+    @EventMethod public void onPlaceConstruction(PlayerPlaceConstructionEvent event) {
+        protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        if (!event.isCancelled() && event.getAllPositions() != null) {
+            for (Vector3f position : event.getAllPositions()) {
+                protect(event, position);
+                if (event.isCancelled()) break;
+            }
+        }
+    }
+    @EventMethod public void onDestroyConstruction(PlayerDestroyConstructionEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onRemoveConstruction(PlayerRemoveConstructionEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onCreativeRemoveConstruction(PlayerCreativeRemoveConstructionEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onEditConstruction(PlayerEditConstructionEvent event) {
+        protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        if (!event.isCancelled()) protect(event, event.getNewChunkPositionX(), event.getNewChunkPositionZ());
+    }
+    @EventMethod public void onHitConstruction(PlayerHitConstructionEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+
+    @EventMethod public void onPlaceObject(PlayerPlaceObjectEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onDestroyObject(PlayerDestroyObjectEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onRemoveObject(PlayerRemoveObjectEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onCreativeRemoveObject(PlayerCreativeRemoveObjectEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onHitObject(PlayerHitObjectEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onChangeObjectColor(PlayerChangeObjectColorEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onChangeObjectInfo(PlayerChangeObjectInfoEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onChangeObjectStatus(PlayerChangeObjectStatusEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+
+    @EventMethod public void onPlaceVegetation(PlayerPlaceVegetationEvent event) {
+        Player player = event.getPlayer();
+        Item seed = player.getEquippedItem();
+        EquippedItemSnapshot snapshot = seed != null && seed.isValid()
+                ? new EquippedItemSnapshot(seed.getTypeID(), seed.getVariant())
+                : lastEquippedItems.get(player.getUID());
+        protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        if (event.isCancelled() && !player.isCreativeModeEnabled()) {
+            refundConsumedItemAfterPlacement(player, snapshot);
+        }
+    }
+    @EventMethod public void onCreativePlaceVegetation(PlayerCreativePlaceVegetationEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onDestroyVegetation(PlayerDestroyVegetationEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onCreativeRemoveVegetation(PlayerCreativeRemoveVegetationEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onHitVegetation(PlayerHitVegetationEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+
+    @EventMethod public void onPlaceTerrain(PlayerPlaceTerrainEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onDestroyTerrain(PlayerDestroyTerrainEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onCreativeTerrainEdit(PlayerCreativeTerrainEditEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onHitTerrain(PlayerHitTerrainEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onPlaceGrass(PlayerPlaceGrassEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onRemoveGrass(PlayerRemoveGrassEvent event) {
+        protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        if (event.isCancelled()) {
+            // Rising World awards cut grass separately from changing the grass
+            // tile, so remember this denied cut long enough to reject its loot.
+            deniedGrassRewardsUntil.put(event.getPlayer().getUID(),
+                    System.currentTimeMillis() + 1500L);
+        }
+    }
+    @EventMethod public void onPlaceWater(PlayerPlaceWaterEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onRemoveWater(PlayerRemoveWaterEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+
+    @EventMethod public void onPlaceBlueprint(PlayerPlaceBlueprintEvent event) {
+        var bounds = event.getBounds();
+        Vector3f center = bounds.getCenter();
+        int minX = Utils.ChunkUtils.getChunkPositionX(center.x - bounds.getXExtent());
+        int maxX = Utils.ChunkUtils.getChunkPositionX(center.x + bounds.getXExtent());
+        int minZ = Utils.ChunkUtils.getChunkPositionZ(center.z - bounds.getZExtent());
+        int maxZ = Utils.ChunkUtils.getChunkPositionZ(center.z + bounds.getZExtent());
+        for (int x = minX; x <= maxX && !event.isCancelled(); x++) {
+            for (int z = minZ; z <= maxZ && !event.isCancelled(); z++) protect(event, x, z);
+        }
+    }
+    @EventMethod public void onPlaceItem(PlayerPlaceItemEvent event) { protect(event, event.getPosition()); }
+
+    @EventMethod
+    public void onInventoryAddItem(PlayerInventoryAddItemEvent event) {
+        Long deniedUntil = deniedGrassRewardsUntil.get(event.getPlayer().getUID());
+        if (deniedUntil == null) return;
+        if (System.currentTimeMillis() > deniedUntil) {
+            deniedGrassRewardsUntil.remove(event.getPlayer().getUID(), deniedUntil);
+            return;
+        }
+        Item item = event.getItem();
+        String itemName = item == null ? "" : item.getName();
+        boolean grassReward = item != null && (item.getTypeID() == 398 || item.getTypeID() == 399
+                || "grass".equalsIgnoreCase(itemName) || "grasspatch".equalsIgnoreCase(itemName));
+        if (grassReward && event.getOrigin() == PlayerInventoryAddItemEvent.Origin.Harvest) {
+            event.setCancelled(true);
+            deniedGrassRewardsUntil.remove(event.getPlayer().getUID(), deniedUntil);
+        }
+    }
+
+    private void protect(Cancellable event, Vector3f position) {
+        Vector3i chunk = Utils.ChunkUtils.getChunkPosition(position);
+        protect(event, chunk.x, chunk.z);
+    }
+
+    private void refundConsumedItemAfterPlacement(Player player, EquippedItemSnapshot snapshot) {
+        if (snapshot == null) {
+            debug("Could not identify the consumed item for denied placement by " + player.getName());
+            return;
+        }
+        // The native planting transaction decrements the stack after the
+        // cancellable world event returns. Reconcile after that transaction.
+        executeDelayed(0.15f, () -> {
+            if (!player.isSpawned()) return;
+            player.getInventory().addItem(snapshot.typeId(), snapshot.variant(), 1);
+            player.getInventory().syncWithClient();
+            debug("Refunded denied planting item " + snapshot.typeId() + ":" + snapshot.variant()
+                    + " to " + player.getName());
+        });
+    }
+
+    private void protect(Cancellable event, int chunkX, int chunkZ) {
+        if (event.isCancelled()) return;
+        Player player = ((net.risingworld.api.events.player.PlayerEvent) event).getPlayer();
+        Claim claim = claims.getClaim(chunkX, chunkZ).orElse(null);
+        if (claim == null) return;
+        String activeClaimIdentity = activeClaimIdentities.get(player.getUID());
+        boolean isOwner = claim.ownerUid().equals(activeClaimIdentity);
+        if (isOwner || (isClaimAdmin(player) && claimAdminOverrideEnabled)) return;
+
+        event.setCancelled(true);
+        long now = System.currentTimeMillis();
+        Long previous = claimProtectionNotices.put(player.getUID(), now);
+        if (previous == null || now - previous >= 1500L) {
+            player.sendTextMessage("<color=#FF7777>This chunk is protected by "
+                    + claim.ownerName() + ".</color>");
+        }
     }
 
     @EventMethod
@@ -922,6 +1082,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                         economy.deleteAccount(character.economyKey());
                         if (active != null && active.id().equals(character.id())) {
                             activeCharacters.remove(player.getUID());
+                            activeClaimIdentities.remove(player.getUID());
                             UILabel balance = balanceLabels.remove(player.getUID());
                             if (balance != null) player.removeUIElement(balance);
                         }
@@ -938,10 +1099,24 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     }
 
     private void activateCharacter(Player player, CharacterService.CharacterSummary character) {
-        characterService.loadCharacter(player, character);
-        activeCharacters.put(player.getUID(), character);
+        String playerUid = player.getUID();
+        CharacterService.CharacterSummary previous = activeCharacters.put(playerUid, character);
+        String previousClaimIdentity = activeClaimIdentities.put(playerUid, character.economyKey());
+        clearClaimVisuals(player);
+        claimProtectionNotices.remove(playerUid);
+        deniedGrassRewardsUntil.remove(playerUid);
+        lastEquippedItems.remove(playerUid);
+        try {
+            characterService.loadCharacter(player, character);
+        } catch (RuntimeException exception) {
+            if (previous == null) activeCharacters.remove(playerUid, character);
+            else activeCharacters.put(playerUid, previous);
+            if (previousClaimIdentity == null) activeClaimIdentities.remove(playerUid, character.economyKey());
+            else activeClaimIdentities.put(playerUid, previousClaimIdentity);
+            throw exception;
+        }
         economy.createAccount(character.economyKey(), economySettings.defaultBalance());
-        CharacterSelectionView view = characterSelectionViews.remove(player.getUID());
+        CharacterSelectionView view = characterSelectionViews.remove(playerUid);
         if (view != null) player.removeUIElement(view.window());
         player.stopInput(false, false);
         player.setMouseCursorVisible(false);
@@ -949,7 +1124,8 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         showWorldClock(player);
         player.sendTextMessage("<color=#77FF99>Now playing as " + character.name() + ".</color>");
         debug("Profile " + character.profileName() + " (" + player.getUID() + ") selected character "
-                + character.name() + " [slot " + character.slot() + "]");
+                + character.name() + " [slot " + character.slot() + ", claim identity "
+                + character.economyKey() + "]");
     }
 
     private String characterKey(Player player) {
@@ -1018,13 +1194,21 @@ public final class RisingWorldStarter extends Plugin implements Listener {
 
         UILabel summary = new UILabel();
         summary.setPosition(20f, 65f, false);
-        summary.setSize(680f, 145f, false);
+        summary.setSize(680f, 105f, false);
         summary.setFontSize(17f);
         summary.setFontColor((int) 0xFFFFFFFFL);
         summary.setTextAlign(TextAnchor.UpperLeft);
         summary.setBackgroundColor((int) 0x202832FFL);
         summary.setBorderEdgeRadius(5f, false);
         window.addChild(summary);
+
+        UILabel adminOverrideButton = new UILabel();
+        adminOverrideButton.setPosition(20f, 178f, false);
+        adminOverrideButton.setSize(220f, 34f, false);
+        adminOverrideButton.setFontSize(14f);
+        adminOverrideButton.setTextAlign(TextAnchor.MiddleCenter);
+        adminOverrideButton.setClickable(true);
+        window.addChild(adminOverrideButton);
 
         UILabel playersTitle = new UILabel("Connected Players");
         playersTitle.setPosition(20f, 220f, false);
@@ -1042,7 +1226,8 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         playerList.setMouseWheelScrollSize(42f);
         window.addChild(playerList);
 
-        AdminView view = new AdminView(window, closeButton, refreshButton, summary, playerList,
+        AdminView view = new AdminView(window, closeButton, refreshButton, summary,
+                adminOverrideButton, playerList,
                 new ConcurrentHashMap<>(), new ConcurrentHashMap<>());
         adminViews.put(player.getUID(), view);
         refreshAdminDashboard(view);
@@ -1062,6 +1247,8 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                 claims.getClaimCount(), claimAdmins.getAll().size(),
                 formatBalance(economySettings.defaultBalance()), formatBalance(economySettings.claimCost()),
                 formatBalance(economySettings.baseSalary()), storeCatalog.items().size()));
+
+        styleProtectionToggle(view.adminOverrideButton(), "ADMIN BYPASS", claimAdminOverrideEnabled);
 
         view.playerList().removeAllChilds();
         view.kickTargetsByButtonId().clear();
@@ -1106,6 +1293,12 @@ public final class RisingWorldStarter extends Plugin implements Listener {
             row.addChild(banButton);
             view.banTargetsByButtonId().put(banButton.getID(), connectedPlayer.getUID());
         }
+    }
+
+    private static void styleProtectionToggle(UILabel button, String label, boolean enabled) {
+        button.setText(label + ": " + (enabled ? "ON" : "OFF"));
+        button.setBackgroundColor(enabled ? (int) 0x2E7D4FFF : (int) 0x8B2D2DFFL);
+        button.setFontColor((int) 0xFFFFFFFFL);
     }
 
     private void kickPlayerFromDashboard(Player administrator, String targetUid) {
@@ -1651,6 +1844,14 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                 refreshAdminDashboard(adminView);
                 return;
             }
+            if (adminElementId == adminView.adminOverrideButton().getID()) {
+                claimAdminOverrideEnabled = !claimAdminOverrideEnabled;
+                refreshAdminDashboard(adminView);
+                player.sendTextMessage("<color=#E8C547>Claim administrator bypass is now "
+                        + (claimAdminOverrideEnabled ? "enabled" : "disabled")
+                        + " for this server session.</color>");
+                return;
+            }
             String kickTarget = adminView.kickTargetsByButtonId().get(adminElementId);
             if (kickTarget != null) {
                 kickPlayerFromDashboard(player, kickTarget);
@@ -1782,8 +1983,11 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private record CartLine(StoreCatalog.StoreItem item, int quantity) {
     }
 
+    private record EquippedItemSnapshot(short typeId, int variant) {
+    }
+
     private record AdminView(UIElement window, UILabel closeButton, UILabel refreshButton,
-                             UILabel summary, UIScrollView playerList,
+                             UILabel summary, UILabel adminOverrideButton, UIScrollView playerList,
                              Map<Integer, String> kickTargetsByButtonId,
                              Map<Integer, String> banTargetsByButtonId) {
     }

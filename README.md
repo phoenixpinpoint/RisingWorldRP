@@ -216,6 +216,19 @@ Server administrators can manage a persistent claim-administrator whitelist:
 Whitelisted claim administrators can use `/unclaim` on anyone's chunk. The list
 is stored by player UID in the world-scoped `claim-admins.properties`.
 
+Claimed chunks are protected from other characters. Non-owners cannot build,
+place blueprints or items, edit terrain/water/grass, harvest vegetation, or
+damage, remove, recolor, or change constructions and objects in the chunk.
+Server administrators and whitelisted claim administrators bypass protection.
+Unclaimed chunks remain available to everyone.
+Cancelled grass cutting also suppresses the associated harvested grass reward.
+Cancelled planting refunds the seed consumed by Rising World's placement action.
+
+Chunk owners always retain access to their own claimed chunks. The `/admin`
+dashboard has one session-only `ADMIN BYPASS` toggle that lets server and claim
+administrators work inside other characters' claims. It resets to disabled
+whenever the plugin or server reloads.
+
 ## World and server isolation
 
 Characters, inventories, balances, claims, and administrator assignments are
