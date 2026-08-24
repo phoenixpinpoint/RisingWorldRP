@@ -229,6 +229,23 @@ dashboard has one session-only `ADMIN BYPASS` toggle that lets server and claim
 administrators work inside other characters' claims. It resets to disabled
 whenever the plugin or server reloads.
 
+### Chest ownership
+
+Storage objects placed inside a claimed chunk belong to that chunk's character
+owner and begin unlocked. Existing chests inherit the current chunk owner the
+first time they are accessed or managed. While looking directly at a chest, its
+owner can use:
+
+- `/chest status`
+- `/chest lock`
+- `/chest unlock`
+
+Unlocked chests may be opened by anyone. Locked chests can only be opened or
+managed by their owning character. When the session-only `ADMIN BYPASS` is on,
+server and claim administrators can also open and manage them. Chest ownership
+and lock state are stored in the world's `chests.properties` file and removed
+when the chest is destroyed.
+
 ## World and server isolation
 
 Characters, inventories, balances, claims, and administrator assignments are

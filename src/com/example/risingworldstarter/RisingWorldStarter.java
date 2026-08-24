@@ -13,6 +13,7 @@ import net.risingworld.api.events.player.PlayerChangeEquippedItemEvent;
 import net.risingworld.api.events.player.PlayerChangePositionEvent;
 import net.risingworld.api.events.player.PlayerDisconnectEvent;
 import net.risingworld.api.events.player.PlayerSpawnEvent;
+import net.risingworld.api.events.player.PlayerStorageAccessEvent;
 import net.risingworld.api.events.player.ui.PlayerUIElementClickEvent;
 import net.risingworld.api.events.player.ui.PlayerUITextFieldChangeEvent;
 import net.risingworld.api.events.player.inventory.PlayerInventoryAddItemEvent;
@@ -24,6 +25,7 @@ import net.risingworld.api.objects.Player;
 import net.risingworld.api.objects.Area;
 import net.risingworld.api.objects.Item;
 import net.risingworld.api.objects.Skin;
+import net.risingworld.api.objects.world.ObjectElement;
 import net.risingworld.api.ui.UIElement;
 import net.risingworld.api.ui.UILabel;
 import net.risingworld.api.ui.MessageBoxButtons;
@@ -92,6 +94,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private EconomyApi economy;
     private ClaimService claims;
     private ClaimAdminService claimAdmins;
+    private ChestService chests;
     private EconomySettings economySettings;
     private StoreCatalog storeCatalog;
     private Path marketplaceConfigPath;
@@ -124,6 +127,8 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         debug("Land claims loaded");
         claimAdmins = new ClaimAdminService(worldDataPath.resolve("claim-admins.properties"));
         debug("Claim administrators loaded: " + claimAdmins.getAll().size());
+        chests = new ChestService(worldDataPath.resolve("chests.properties"));
+        debug("Chest ownership and locks loaded");
         characterService = new CharacterService(worldDataPath.resolve("characters"));
         debug("Character service loaded with four slots per account");
 
@@ -163,7 +168,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         characterAutosaveTimer = new Timer(60f, 60f, -1, this::saveActiveCharacters);
         characterAutosaveTimer.start();
         debug("World clock and payroll timer started; payroll runs at 00:00, 08:00, and 16:00");
-        debug("Commands registered: /characters, /syncappearance, /balance, /bal, /store, /admin, /claim, /unclaim, /chunk, /claims, /claimadmin");
+        debug("Commands registered: /characters, /syncappearance, /balance, /bal, /store, /admin, /claim, /unclaim, /chunk, /claims, /claimadmin, /chest");
         System.out.println("[RisingWorldStarter] Enabled on Rising World " + getGameVersion());
     }
 
@@ -370,14 +375,52 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     }
     @EventMethod public void onHitConstruction(PlayerHitConstructionEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
 
-    @EventMethod public void onPlaceObject(PlayerPlaceObjectEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
-    @EventMethod public void onDestroyObject(PlayerDestroyObjectEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
-    @EventMethod public void onRemoveObject(PlayerRemoveObjectEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
-    @EventMethod public void onCreativeRemoveObject(PlayerCreativeRemoveObjectEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onPlaceObject(PlayerPlaceObjectEvent event) {
+        protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        if (!event.isCancelled() && isStorage(event.getObjectDefinition())) {
+            Claim claim = claims.getClaim(event.getChunkPositionX(), event.getChunkPositionZ()).orElse(null);
+            if (claim != null) chests.assign(event.getGlobalID(), event.getChunkPositionX(),
+                    event.getChunkPositionY(), event.getChunkPositionZ(), claim.ownerUid(), claim.ownerName());
+        }
+    }
+    @EventMethod public void onDestroyObject(PlayerDestroyObjectEvent event) {
+        protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        if (!event.isCancelled()) removeChestOwnership(event.getGlobalID(), event.getChunkPositionX(),
+                event.getChunkPositionY(), event.getChunkPositionZ());
+    }
+    @EventMethod public void onRemoveObject(PlayerRemoveObjectEvent event) {
+        protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        if (!event.isCancelled()) removeChestOwnership(event.getGlobalID(), event.getChunkPositionX(),
+                event.getChunkPositionY(), event.getChunkPositionZ());
+    }
+    @EventMethod public void onCreativeRemoveObject(PlayerCreativeRemoveObjectEvent event) {
+        protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        if (!event.isCancelled()) removeChestOwnership(event.getGlobalID(), event.getChunkPositionX(),
+                event.getChunkPositionY(), event.getChunkPositionZ());
+    }
     @EventMethod public void onHitObject(PlayerHitObjectEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
     @EventMethod public void onChangeObjectColor(PlayerChangeObjectColorEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
     @EventMethod public void onChangeObjectInfo(PlayerChangeObjectInfoEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
-    @EventMethod public void onChangeObjectStatus(PlayerChangeObjectStatusEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onChangeObjectStatus(PlayerChangeObjectStatusEvent event) {
+        // Opening a storage is governed by its own lock. Other object state
+        // changes (doors, lights, etc.) remain covered by chunk protection.
+        if (!isStorage(event.getObjectDefinition())) {
+            protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        }
+    }
+
+    @EventMethod
+    public void onStorageAccess(PlayerStorageAccessEvent event) {
+        ChestOwnership ownership = getOrAssignChest(event.getGlobalID(), event.getChunkPositionX(),
+                event.getChunkPositionY(), event.getChunkPositionZ());
+        if (ownership == null || !ownership.locked()) return;
+        String identity = activeClaimIdentities.get(event.getPlayer().getUID());
+        if (ownership.ownerUid().equals(identity)
+                || (isClaimAdmin(event.getPlayer()) && claimAdminOverrideEnabled)) return;
+        event.setCancelled(true);
+        event.getPlayer().sendTextMessage("<color=#FF7777>This chest is locked by "
+                + ownership.ownerName() + ".</color>");
+    }
 
     @EventMethod public void onPlaceVegetation(PlayerPlaceVegetationEvent event) {
         Player player = event.getPlayer();
@@ -559,7 +602,63 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         } else if (command.equalsIgnoreCase("/claimadmin")) {
             event.setCancelled(true);
             handleClaimAdminCommand(event.getPlayer(), parts);
+        } else if (command.equalsIgnoreCase("/chest")) {
+            event.setCancelled(true);
+            handleChestCommand(event.getPlayer(), parts);
         }
+    }
+
+    private void handleChestCommand(Player player, String[] parts) {
+        if (parts.length != 2 || !(parts[1].equalsIgnoreCase("lock")
+                || parts[1].equalsIgnoreCase("unlock") || parts[1].equalsIgnoreCase("status"))) {
+            player.sendTextMessage("Usage: /chest lock, /chest unlock, or /chest status while looking at a chest");
+            return;
+        }
+        player.getObjectElementInLineOfSight(6f, object -> {
+            if (object == null || !object.isValid() || !isStorage(object.getDefinition())) {
+                player.sendTextMessage("<color=#FFAA66>Look directly at a chest or storage object within 6 meters.</color>");
+                return;
+            }
+            ChestOwnership ownership = getOrAssignChest(object.getGlobalID(), object.getChunkPositionX(),
+                    object.getChunkPositionY(), object.getChunkPositionZ());
+            if (ownership == null) {
+                player.sendTextMessage("<color=#FFAA66>This chest is not inside a claimed chunk.</color>");
+                return;
+            }
+            boolean ownsChest = ownership.ownerUid().equals(activeClaimIdentities.get(player.getUID()));
+            boolean adminCanManage = isClaimAdmin(player) && claimAdminOverrideEnabled;
+            if (!ownsChest && !adminCanManage) {
+                player.sendTextMessage("<color=#FF7777>This chest belongs to "
+                        + ownership.ownerName() + ".</color>");
+                return;
+            }
+            if (parts[1].equalsIgnoreCase("status")) {
+                player.sendTextMessage("<color=#E8C547>Chest owner:</color> " + ownership.ownerName()
+                        + "     <color=#E8C547>Status:</color> "
+                        + (ownership.locked() ? "Locked" : "Unlocked"));
+                return;
+            }
+            boolean locked = parts[1].equalsIgnoreCase("lock");
+            chests.setLocked(object.getGlobalID(), object.getChunkPositionX(), object.getChunkPositionY(),
+                    object.getChunkPositionZ(), ownership, locked);
+            player.sendTextMessage("<color=#77FF99>Chest " + (locked ? "locked" : "unlocked") + ".</color>");
+        });
+    }
+
+    private ChestOwnership getOrAssignChest(long globalId, int chunkX, int chunkY, int chunkZ) {
+        ChestOwnership existing = chests.get(globalId, chunkX, chunkY, chunkZ).orElse(null);
+        if (existing != null) return existing;
+        Claim claim = claims.getClaim(chunkX, chunkZ).orElse(null);
+        return claim == null ? null : chests.assign(globalId, chunkX, chunkY, chunkZ,
+                claim.ownerUid(), claim.ownerName());
+    }
+
+    private void removeChestOwnership(long globalId, int chunkX, int chunkY, int chunkZ) {
+        chests.remove(globalId, chunkX, chunkY, chunkZ);
+    }
+
+    private static boolean isStorage(net.risingworld.api.definitions.Objects.ObjectDefinition definition) {
+        return definition != null && definition.type == net.risingworld.api.definitions.Objects.Type.Storage;
     }
 
     private void listOwnedChunks(Player player) {
