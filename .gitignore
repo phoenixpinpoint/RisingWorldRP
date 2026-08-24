@@ -26,3 +26,6 @@ replay_pid*
 # Gradle output and local state
 .gradle/
 build/
+
+# Machine-specific editor configuration
+.vscode/
