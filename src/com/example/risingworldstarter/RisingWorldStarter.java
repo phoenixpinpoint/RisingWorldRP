@@ -77,7 +77,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                 + ", claim cost=" + formatBalance(economySettings.claimCost())
                 + ", 8-hour salary=" + formatBalance(economySettings.baseSalary()));
 
-        Path marketplaceConfigPath = pluginPath.resolve("marketplace.properties");
+        Path marketplaceConfigPath = pluginPath.resolve("marketplace.json");
         storeCatalog = StoreCatalog.load(marketplaceConfigPath);
         debug("Marketplace config loaded from " + marketplaceConfigPath);
         debug("Marketplace enabled items: " + storeCatalog.items().size());

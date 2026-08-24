@@ -75,7 +75,7 @@ tasks.register('installConfig', Copy) {
     group = 'Rising World'
     description = 'Explicitly copies project configuration templates into the plugin directory.'
     from layout.projectDirectory.dir('config')
-    include '*.properties'
+    include '*.properties', '*.json'
     into risingWorldDirectory.map { new File(it, 'Plugins/RisingWorldStarter') }
 }
 

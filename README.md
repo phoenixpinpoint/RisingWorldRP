@@ -57,7 +57,7 @@ templates from `config/` into the plugin directory, run:
 ```
 
 `installConfig` may overwrite existing `economy.properties` and
-`marketplace.properties`, so use it only when you intend to load the project's
+`marketplace.json`, so use it only when you intend to load the project's
 configuration. On Windows, use `gradlew.bat`.
 
 Restart the game/server. Its console/log should report `[RisingWorldStarter] Enabled ...`.
@@ -104,9 +104,9 @@ economyPlugin.updateBalanceLabel(player);    // refresh connected player's HUD
 
 ## Marketplace
 
-Use `/store` to open or close the marketplace. The scrollable store initially
-contains every item reported by the installed Rising World API. Each row shows
-the game's square item icon, its name and price, and a separate Buy button.
+Use `/store` to open or close the marketplace. The scrollable store contains
+only explicitly priced items from the installed Rising World API. Each row shows
+the game's square item icon, its name and price, and quantity controls.
 Buying deducts the price and places one unit in the player's inventory. A failed
 inventory insertion is refunded. Items are sorted and grouped under the category
 reported by the game; definitions without a category appear under `Other`.
@@ -120,24 +120,35 @@ buttons. Checkout charges the cart once; products that cannot fit in the
 inventory are refunded and remain in the cart for the player to retry.
 
 On first startup the plugin generates
-`Plugins/RisingWorldStarter/marketplace.properties`. Each item has entries like:
+`Plugins/RisingWorldStarter/marketplace.json`. Each item has an object like:
 
-```properties
-item.123.name=exampleitem
-item.123.category=MISCELLANEOUS
-item.123.enabled=true
-item.123.price=100.00
+```json
+{
+  "items": {
+    "123": {
+      "name": "exampleitem",
+      "category": "Misc",
+      "enabled": true,
+      "price": 100.00
+    }
+  }
+}
 ```
 
-Set `enabled=false` to remove an item from the store or change `price` to any
-non-negative dollar amount with at most two decimal places. Reload the plugin
-after editing the file. Newly added game items are appended automatically with
-the default `$100.00` price.
+An item is rendered only when its `price` field exists. Set the price to any
+non-negative dollar amount with at most two decimal places. Remove the `price`
+field to remove the item from the store, or set `enabled` to `false` to
+hide it while retaining its price. Reload the plugin after editing the file.
+New game items receive name/category metadata but no automatic price, so they
+remain hidden until explicitly priced.
 
 Internal placeholder items (`clothingitem`, `oldboot`, `missingitem`,
 `constructionitem`, `objectkit`, `objectkitsmall`, `plantitem`, and `blueprint`)
 and all items categorized or typed as NPCs are never purchasable. Their generated
-`enabled` setting is forced to `false`, including in an existing configuration.
+`enabled` field is forced to `false`, including in an existing configuration.
+
+If `marketplace.json` does not exist but the old `marketplace.properties` does,
+the plugin imports it once and writes the equivalent JSON file.
 
 ## Land claims
 
