@@ -1,0 +1,112 @@
+package com.example.risingworldstarter;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Properties;
+
+final class ClaimService {
+    private final Path dataFile;
+    private final Map<String, Claim> claims = new HashMap<>();
+
+    ClaimService(Path dataFile) {
+        this.dataFile = Objects.requireNonNull(dataFile, "dataFile");
+        load();
+    }
+
+    synchronized Optional<Claim> getClaim(int chunkX, int chunkZ) {
+        return Optional.ofNullable(claims.get(key(chunkX, chunkZ)));
+    }
+
+    synchronized boolean claim(int chunkX, int chunkZ, String ownerUid, String ownerName) {
+        String key = key(chunkX, chunkZ);
+        if (claims.containsKey(key)) {
+            return false;
+        }
+        claims.put(key, new Claim(requireText(ownerUid, "ownerUid"), requireText(ownerName, "ownerName")));
+        save();
+        return true;
+    }
+
+    synchronized boolean unclaim(int chunkX, int chunkZ, String ownerUid) {
+        String key = key(chunkX, chunkZ);
+        Claim existing = claims.get(key);
+        if (existing == null || !existing.ownerUid().equals(ownerUid)) {
+            return false;
+        }
+        claims.remove(key);
+        save();
+        return true;
+    }
+
+    synchronized boolean forceUnclaim(int chunkX, int chunkZ) {
+        if (claims.remove(key(chunkX, chunkZ)) == null) {
+            return false;
+        }
+        save();
+        return true;
+    }
+
+    private void load() {
+        if (!Files.exists(dataFile)) {
+            return;
+        }
+        Properties properties = new Properties();
+        try (InputStream input = Files.newInputStream(dataFile)) {
+            properties.load(input);
+            for (String chunkKey : properties.stringPropertyNames()) {
+                String[] value = properties.getProperty(chunkKey).split(":", 2);
+                if (value.length == 2) {
+                    String name = new String(Base64.getUrlDecoder().decode(value[1]), StandardCharsets.UTF_8);
+                    claims.put(chunkKey, new Claim(value[0], name));
+                }
+            }
+        } catch (IOException | IllegalArgumentException exception) {
+            throw new IllegalStateException("Could not load claims from " + dataFile, exception);
+        }
+    }
+
+    private void save() {
+        Path temporaryFile = dataFile.resolveSibling(dataFile.getFileName() + ".tmp");
+        Properties properties = new Properties();
+        claims.forEach((chunk, claim) -> {
+            String name = Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(claim.ownerName().getBytes(StandardCharsets.UTF_8));
+            properties.setProperty(chunk, claim.ownerUid() + ":" + name);
+        });
+        try {
+            Files.createDirectories(dataFile.getParent());
+            try (OutputStream output = Files.newOutputStream(temporaryFile)) {
+                properties.store(output, "Rising World chunk claims");
+            }
+            try {
+                Files.move(temporaryFile, dataFile, StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE);
+            } catch (IOException unsupportedAtomicMove) {
+                Files.move(temporaryFile, dataFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException exception) {
+            throw new IllegalStateException("Could not save claims to " + dataFile, exception);
+        }
+    }
+
+    private static String key(int chunkX, int chunkZ) {
+        return chunkX + "," + chunkZ;
+    }
+
+    private static String requireText(String value, String name) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(name + " must not be blank");
+        }
+        return value;
+    }
+}
