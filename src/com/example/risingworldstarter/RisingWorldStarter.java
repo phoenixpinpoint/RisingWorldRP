@@ -358,10 +358,10 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     /* Claim protection uses the chunk reported by the affected world element,
        rather than the chunk in which the player happens to be standing. */
     @EventMethod public void onPlaceConstruction(PlayerPlaceConstructionEvent event) {
-        protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ());
         if (!event.isCancelled() && event.getAllPositions() != null) {
             for (Vector3f position : event.getAllPositions()) {
-                protect(event, position);
+                protectOwnedLand(event, position);
                 if (event.isCancelled()) break;
             }
         }
@@ -371,12 +371,12 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     @EventMethod public void onCreativeRemoveConstruction(PlayerCreativeRemoveConstructionEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
     @EventMethod public void onEditConstruction(PlayerEditConstructionEvent event) {
         protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
-        if (!event.isCancelled()) protect(event, event.getNewChunkPositionX(), event.getNewChunkPositionZ());
+        if (!event.isCancelled()) protectOwnedLand(event, event.getNewChunkPositionX(), event.getNewChunkPositionZ());
     }
     @EventMethod public void onHitConstruction(PlayerHitConstructionEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
 
     @EventMethod public void onPlaceObject(PlayerPlaceObjectEvent event) {
-        protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ());
         if (!event.isCancelled() && isStorage(event.getObjectDefinition())) {
             Claim claim = claims.getClaim(event.getChunkPositionX(), event.getChunkPositionZ()).orElse(null);
             if (claim != null) chests.assign(event.getGlobalID(), event.getChunkPositionX(),
@@ -428,21 +428,21 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         EquippedItemSnapshot snapshot = seed != null && seed.isValid()
                 ? new EquippedItemSnapshot(seed.getTypeID(), seed.getVariant())
                 : lastEquippedItems.get(player.getUID());
-        protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ());
         if (event.isCancelled() && !player.isCreativeModeEnabled()) {
             refundConsumedItemAfterPlacement(player, snapshot);
         }
     }
-    @EventMethod public void onCreativePlaceVegetation(PlayerCreativePlaceVegetationEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onCreativePlaceVegetation(PlayerCreativePlaceVegetationEvent event) { protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
     @EventMethod public void onDestroyVegetation(PlayerDestroyVegetationEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
     @EventMethod public void onCreativeRemoveVegetation(PlayerCreativeRemoveVegetationEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
     @EventMethod public void onHitVegetation(PlayerHitVegetationEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
 
-    @EventMethod public void onPlaceTerrain(PlayerPlaceTerrainEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
-    @EventMethod public void onDestroyTerrain(PlayerDestroyTerrainEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
-    @EventMethod public void onCreativeTerrainEdit(PlayerCreativeTerrainEditEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onPlaceTerrain(PlayerPlaceTerrainEvent event) { protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onDestroyTerrain(PlayerDestroyTerrainEvent event) { protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onCreativeTerrainEdit(PlayerCreativeTerrainEditEvent event) { protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
     @EventMethod public void onHitTerrain(PlayerHitTerrainEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
-    @EventMethod public void onPlaceGrass(PlayerPlaceGrassEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onPlaceGrass(PlayerPlaceGrassEvent event) { protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
     @EventMethod public void onRemoveGrass(PlayerRemoveGrassEvent event) {
         protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
         if (event.isCancelled()) {
@@ -452,8 +452,8 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                     System.currentTimeMillis() + 1500L);
         }
     }
-    @EventMethod public void onPlaceWater(PlayerPlaceWaterEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
-    @EventMethod public void onRemoveWater(PlayerRemoveWaterEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onPlaceWater(PlayerPlaceWaterEvent event) { protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onRemoveWater(PlayerRemoveWaterEvent event) { protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
 
     @EventMethod public void onPlaceBlueprint(PlayerPlaceBlueprintEvent event) {
         var bounds = event.getBounds();
@@ -463,10 +463,10 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         int minZ = Utils.ChunkUtils.getChunkPositionZ(center.z - bounds.getZExtent());
         int maxZ = Utils.ChunkUtils.getChunkPositionZ(center.z + bounds.getZExtent());
         for (int x = minX; x <= maxX && !event.isCancelled(); x++) {
-            for (int z = minZ; z <= maxZ && !event.isCancelled(); z++) protect(event, x, z);
+            for (int z = minZ; z <= maxZ && !event.isCancelled(); z++) protectOwnedLand(event, x, z);
         }
     }
-    @EventMethod public void onPlaceItem(PlayerPlaceItemEvent event) { protect(event, event.getPosition()); }
+    @EventMethod public void onPlaceItem(PlayerPlaceItemEvent event) { protectOwnedLand(event, event.getPosition()); }
 
     @EventMethod
     public void onInventoryAddItem(PlayerInventoryAddItemEvent event) {
@@ -491,6 +491,15 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         protect(event, chunk.x, chunk.z);
     }
 
+    private void protectOwnedLand(Cancellable event, Vector3f position) {
+        Vector3i chunk = Utils.ChunkUtils.getChunkPosition(position);
+        protectOwnedLand(event, chunk.x, chunk.z);
+    }
+
+    private void protectOwnedLand(Cancellable event, int chunkX, int chunkZ) {
+        protect(event, chunkX, chunkZ, true);
+    }
+
     private void refundConsumedItemAfterPlacement(Player player, EquippedItemSnapshot snapshot) {
         if (snapshot == null) {
             debug("Could not identify the consumed item for denied placement by " + player.getName());
@@ -508,20 +517,33 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     }
 
     private void protect(Cancellable event, int chunkX, int chunkZ) {
+        protect(event, chunkX, chunkZ, false);
+    }
+
+    private void protect(Cancellable event, int chunkX, int chunkZ, boolean requiresOwnedLand) {
         if (event.isCancelled()) return;
         Player player = ((net.risingworld.api.events.player.PlayerEvent) event).getPlayer();
         Claim claim = claims.getClaim(chunkX, chunkZ).orElse(null);
-        if (claim == null) return;
+        if (claim == null) {
+            if (!requiresOwnedLand) return;
+            event.setCancelled(true);
+            sendClaimProtectionNotice(player,
+                    "Claim this chunk before placing items or modifying terrain.");
+            return;
+        }
         String activeClaimIdentity = activeClaimIdentities.get(player.getUID());
         boolean isOwner = claim.ownerUid().equals(activeClaimIdentity);
         if (isOwner || (isClaimAdmin(player) && claimAdminOverrideEnabled)) return;
 
         event.setCancelled(true);
+        sendClaimProtectionNotice(player, "This chunk is protected by " + claim.ownerName() + ".");
+    }
+
+    private void sendClaimProtectionNotice(Player player, String message) {
         long now = System.currentTimeMillis();
         Long previous = claimProtectionNotices.put(player.getUID(), now);
         if (previous == null || now - previous >= 1500L) {
-            player.sendTextMessage("<color=#FF7777>This chunk is protected by "
-                    + claim.ownerName() + ".</color>");
+            player.sendTextMessage("<color=#FF7777>" + message + "</color>");
         }
     }
 

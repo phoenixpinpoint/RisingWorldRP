@@ -220,7 +220,9 @@ Claimed chunks are protected from other characters. Non-owners cannot build,
 place blueprints or items, edit terrain/water/grass, harvest vegetation, or
 damage, remove, recolor, or change constructions and objects in the chunk.
 Server administrators and whitelisted claim administrators bypass protection.
-Unclaimed chunks remain available to everyone.
+On unclaimed chunks, players may gather natural resources such as grass, trees,
+and wild plants, but cannot place items, build, plant, or modify terrain, water,
+or grass. A character must claim the chunk before developing the land.
 Cancelled grass cutting also suppresses the associated harvested grass reward.
 Cancelled planting refunds the seed consumed by Rising World's placement action.
 
