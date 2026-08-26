@@ -36,7 +36,7 @@ public final class WindowTrimService {
         if (window != null) {
             position = window.getWorldPosition().copy();
             rotation = window.getRotation().copy();
-            Vector3f actualSize = window.getScale();
+            Vector3f actualSize = getPhysicalSize(window);
             if (actualSize != null && actualSize.x > 0.05f
                     && actualSize.y > 0.05f && actualSize.z > 0.02f) {
                 openingSize = actualSize.copy();
@@ -158,7 +158,7 @@ public final class WindowTrimService {
                 if (elements == null) continue;
                 for (ConstructionElement wall : elements) {
                     if (!isWall(wall)) continue;
-                    Vector3f size = wall.getScale();
+                    Vector3f size = getPhysicalSize(wall);
                     Quaternion rotation = wall.getRotation().copy();
                     Vector3f local = rotation.inverse().mult(position.subtract(wall.getWorldPosition()));
                     boolean widthIsX = size.x >= size.z;
@@ -214,7 +214,7 @@ public final class WindowTrimService {
         Constructions.ConstructionDefinition definition = Definitions.getConstructionDefinition(element.getTypeID());
         if (definition == null || definition.type == Constructions.Type.Window
                 || definition.shapetype != Constructions.ShapeType.Default) return false;
-        Vector3f size = element.getScale();
+        Vector3f size = getPhysicalSize(element);
         return size != null && size.y >= 0.25f && Math.max(size.x, size.z) >= 0.25f
                 && Math.min(size.x, size.z) <= 1f;
     }
@@ -222,7 +222,7 @@ public final class WindowTrimService {
     private boolean trimWall(ConstructionElement wall, Vector3f openingPosition,
                              Quaternion openingRotation, Vector3f openingSize,
                              boolean detectOnly) {
-        Vector3f wallSize = wall.getScale();
+        Vector3f wallSize = getPhysicalSize(wall);
         if (wallSize == null) return false;
         wallSize = wallSize.copy();
         Quaternion rotation = wall.getRotation().copy();
@@ -295,6 +295,17 @@ public final class WindowTrimService {
             created.setPlayerDbID(source.getPlayerDbID());
             created.setStrength(source.getStrength());
         }
+    }
+
+    /** Converts the construction's scale multiplier into world-space dimensions. */
+    private static Vector3f getPhysicalSize(ConstructionElement element) {
+        if (element == null) return null;
+        Vector3f scale = element.getScale();
+        if (scale == null) return null;
+        Constructions.ConstructionDefinition definition =
+                Definitions.getConstructionDefinition(element.getTypeID());
+        if (definition == null || definition.startsize == null) return scale.copy();
+        return definition.startsize.mult(scale);
     }
 
     private void log(String message) {

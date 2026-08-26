@@ -22,20 +22,43 @@ if (!configuredRisingWorldPath.present && configFile.isFile()) {
     }
 }
 
-def risingWorldDirectory = configuredRisingWorldPath.map { file(it) }
-def sdkJar = risingWorldDirectory.map { directory ->
-    def sdkDirectory = new File(directory, 'Data/SDK')
-    def preferredJar = new File(sdkDirectory, 'PluginAPI.jar')
-    if (preferredJar.isFile()) {
-        return preferredJar
-    }
+def standardInstallPaths = [
+        new File(System.getProperty('user.home'),
+                'Library/Application Support/Steam/steamapps/common/RisingWorld'),
+        new File(System.getProperty('user.home'),
+                '.steam/steam/steamapps/common/RisingWorld')
+]
+def configuredDirectory = configuredRisingWorldPath.present
+        ? file(configuredRisingWorldPath.get())
+        : null
+def risingWorldDirectory = configuredDirectory?.isDirectory()
+        ? configuredDirectory
+        : standardInstallPaths.find { it.isDirectory() }
 
-    def jars = fileTree(sdkDirectory) { include '*.jar' }.files.sort()
-    if (jars.empty) {
-        throw new GradleException("No Rising World API JAR found in ${sdkDirectory}")
-    }
-    return jars.first()
+if (configuredDirectory != null && !configuredDirectory.isDirectory()) {
+    logger.warn("Configured Rising World directory does not exist: ${configuredDirectory}")
 }
+
+def findSdkJar = { File directory ->
+    if (directory == null) return null
+    def sdkDirectories = [
+            new File(directory, 'Data/SDK'),
+            new File(directory, 'RisingWorld.app/Contents/Resources/Data/SDK')
+    ]
+    for (def sdkDirectory : sdkDirectories) {
+        def preferredJar = new File(sdkDirectory, 'PluginAPI.jar')
+        if (preferredJar.isFile()) {
+            return preferredJar
+        }
+
+        def jars = sdkDirectory.isDirectory()
+                ? fileTree(sdkDirectory) { include '*.jar' }.files.sort()
+                : []
+        if (!jars.empty) return jars.first()
+    }
+    return null
+}
+def sdkJar = findSdkJar(risingWorldDirectory)
 
 sourceSets {
     main {
@@ -46,9 +69,9 @@ sourceSets {
 }
 
 dependencies {
-    // Resolve the local file eagerly so IDE tooling models include PluginAPI.jar
-    // on the compile classpath instead of seeing only a deferred Provider.
-    compileOnly files(sdkJar.get())
+    if (sdkJar != null) {
+        compileOnly files(sdkJar)
+    }
 }
 
 java {
@@ -59,6 +82,11 @@ java {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     options.release = 20
+    doFirst {
+        if (sdkJar == null) {
+            throw new GradleException('Rising World Plugin API not found. Set -PrisingWorldPath="/path/to/RisingWorld", set RISING_WORLD_PATH, or update config/build.config.json for this computer.')
+        }
+    }
 }
 
 tasks.named('jar') {
@@ -72,7 +100,7 @@ tasks.register('installPlugin', Copy) {
     description = 'Builds and installs the plugin into the configured Rising World installation.'
     dependsOn tasks.named('jar')
     from tasks.named('jar').flatMap { it.archiveFile }
-    into risingWorldDirectory.map { new File(it, 'Plugins/RisingWorldStarter') }
+    into { requireRisingWorldDirectory(risingWorldDirectory) }
 }
 
 tasks.register('installConfig', Copy) {
@@ -80,11 +108,23 @@ tasks.register('installConfig', Copy) {
     description = 'Explicitly copies project configuration templates into the plugin directory.'
     from layout.projectDirectory.dir('config')
     include '*.properties', '*.json'
-    into risingWorldDirectory.map { new File(it, 'Plugins/RisingWorldStarter') }
+    into { requireRisingWorldDirectory(risingWorldDirectory) }
 }
 
 tasks.register('printRisingWorldSdk') {
     group = 'Rising World'
     description = 'Prints the Rising World API JAR used for compilation.'
-    doLast { println sdkJar.get() }
+    doLast {
+        if (sdkJar == null) {
+            throw new GradleException('Rising World Plugin API not found; configure risingWorldPath for this computer.')
+        }
+        println sdkJar
+    }
+}
+
+File requireRisingWorldDirectory(File directory) {
+    if (directory == null) {
+        throw new GradleException('Rising World installation not found; configure risingWorldPath for this computer.')
+    }
+    return new File(directory, 'Plugins/RisingWorldStarter')
 }

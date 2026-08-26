@@ -83,7 +83,7 @@ The top-center HUD shows the current in-world year, month, day, and 24-hour
 clock. It follows the server's world calendar and refreshes once per second.
 
 Balances are stored as integer minor units (cents) in
-`Worlds/<world>/plugins/RisingWorldStarter/balances.properties`. New players start with
+`Worlds/<world>/RisingWorldStarter/balances.properties`. New players start with
 `$25,000.00`, and claiming a chunk costs `$10,000.00`.
 
 These values can be changed in `config/economy.properties` before explicitly
@@ -134,7 +134,7 @@ On first use, the plugin creates slot 1 as a legacy character before changing
 the player. It captures the existing name, inventory, clothing, appearance,
 position, rotation, health, hunger, thirst, stamina, balance, and claims.
 Character-controlled data is stored beneath
-`Worlds/<world>/plugins/RisingWorldStarter/characters/` and autosaved every 60 seconds as well
+`Worlds/<world>/RisingWorldStarter/characters/` and autosaved every 60 seconds as well
 as on disconnect and plugin shutdown.
 
 Balances, salary, claims, inventory, appearance, status, position, and future
@@ -194,7 +194,7 @@ the plugin imports it once and writes the equivalent JSON file.
 ## Land claims
 
 Land ownership is stored by horizontal chunk in
-`Worlds/<world>/plugins/RisingWorldStarter/claims.properties`. Available chat commands:
+`Worlds/<world>/RisingWorldStarter/claims.properties`. Available chat commands:
 
 - `/claim` claims the chunk where you are standing.
 - `/chunk` reports the current chunk coordinates and owner, and draws its boundary.
@@ -248,10 +248,10 @@ server and claim administrators can also open and manage them. Chest ownership
 and lock state are stored in the world's `chests.properties` file and removed
 when the chest is destroyed.
 
-### Automatic door and window trim
+### Automatic window trim
 
-Placing a door or window into a solid block wall automatically removes the block
-cells intersecting the opening. The frame remains in place and the surrounding
+Placing a window into a solid block wall automatically removes the block cells
+intersecting the opening. The frame remains in place and the surrounding
 wall blocks are left unchanged. The carve follows the placed frame's horizontal
 rotation and uses Rising World's solid-terrain restriction so air, water, and
 unrelated non-block elements are not modified.
@@ -260,14 +260,15 @@ unrelated non-block elements are not modified.
 
 Characters, inventories, balances, claims, and administrator assignments are
 isolated by Rising World's own world directory. Starting another world or
-server uses its separate `Worlds/<world>/plugins/RisingWorldStarter/`
+server uses its separate `Worlds/<world>/RisingWorldStarter/`
 directory, preventing characters and inventories from crossing between worlds. On the first launch after upgrading, legacy
-global data is copied into the currently loaded world once; the original files
+global data and the previous `plugins/RisingWorldStarter` world data are copied
+into the currently loaded world once; the original files
 remain in place as a recovery backup.
 
 Each enabled world directory contains its own `plugin.properties`,
 `economy.properties`, and `marketplace.json`. A world must explicitly contain
-`Worlds/<world>/plugins/RisingWorldStarter/plugin.properties` or the plugin does
+`Worlds/<world>/RisingWorldStarter/plugin.properties` or the plugin does
 nothing for that world. When the opt-in file exists, root economy and marketplace
 copies are used as templates for any missing world configuration. Set
 `enabled=false` to temporarily disable an opted-in world without removing the

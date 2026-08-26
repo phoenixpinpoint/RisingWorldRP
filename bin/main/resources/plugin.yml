@@ -1,0 +1,7 @@
+name: RisingWorldStarter
+main: com.example.risingworldstarter.RisingWorldStarter
+version: 0.7.2
+author: Adam Guthrie
+description: "Persistent economy and chunk-based land claims with in-world visualization"
+loadorder: 0
+license: MIT

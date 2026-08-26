@@ -1,7 +1,6 @@
 package com.example.risingworldstarter;
 
 import com.example.risingworldstarter.autotrim.WindowTrimService;
-import com.example.risingworldstarter.autotrim.DoorTrimService;
 import net.risingworld.api.Plugin;
 import net.risingworld.api.Server;
 import net.risingworld.api.Timer;
@@ -109,7 +108,6 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private volatile boolean storeCatalogLoaded;
     private CharacterService characterService;
     private WindowTrimService windowTrimService;
-    private DoorTrimService doorTrimService;
     private Timer worldClockTimer;
     private Timer characterAutosaveTimer;
     private PayPeriod lastSalaryPeriod;
@@ -121,15 +119,18 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         debug("Starting plugin initialization");
         debug("Plugin data directory: " + pluginPath);
 
-        Path worldDataPath = World.getWorldFolder().toPath().toAbsolutePath().normalize()
-                .resolve("plugins").resolve("RisingWorldStarter");
+        Path worldFolder = World.getWorldFolder().toPath().toAbsolutePath().normalize();
+        // Keep persistent data directly in the game's world save. Steam Cloud
+        // synchronizes world content, but plugin-installation folders are not
+        // part of the portable save on every platform.
+        Path worldDataPath = worldFolder.resolve("RisingWorldStarter");
         debug("World-scoped data directory: " + worldDataPath);
+        prepareWorldDataDirectory(pluginPath, worldDataPath);
         if (!isEnabledForWorld(worldDataPath.resolve("plugin.properties"))) {
             System.out.println("[RisingWorldStarter] Not enabled for world " + World.getName()
                     + ": create " + worldDataPath.resolve("plugin.properties") + " to opt in");
             return;
         }
-        prepareWorldDataDirectory(pluginPath, worldDataPath);
 
         economy = new FileEconomyService(worldDataPath.resolve("balances.properties"));
         debug("Economy balances loaded");
@@ -142,7 +143,6 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         characterService = new CharacterService(worldDataPath.resolve("characters"));
         debug("Character service loaded with four slots per account");
         windowTrimService = new WindowTrimService(RisingWorldStarter::debug);
-        doorTrimService = new DoorTrimService(windowTrimService, RisingWorldStarter::debug);
         debug("Window auto-trim service loaded");
 
         Path economyConfigPath = worldDataPath.resolve("economy.properties");
@@ -187,21 +187,37 @@ public final class RisingWorldStarter extends Plugin implements Listener {
 
     private void prepareWorldDataDirectory(Path pluginPath, Path worldDataPath) {
         Path worldFolder = World.getWorldFolder().toPath().toAbsolutePath().normalize();
+        Path previousWorldDataPath = worldFolder.resolve("plugins").resolve("RisingWorldStarter");
 
         try {
             Files.createDirectories(worldDataPath);
+            copyLegacyFile(previousWorldDataPath.resolve("plugin.properties"),
+                    worldDataPath.resolve("plugin.properties"));
+            copyLegacyFile(previousWorldDataPath.resolve("economy.properties"),
+                    worldDataPath.resolve("economy.properties"));
+            copyLegacyFile(previousWorldDataPath.resolve("marketplace.json"),
+                    worldDataPath.resolve("marketplace.json"));
             copyLegacyFile(pluginPath.resolve("economy.properties"),
                     worldDataPath.resolve("economy.properties"));
             copyLegacyFile(pluginPath.resolve("marketplace.json"),
                     worldDataPath.resolve("marketplace.json"));
             Path worldMigrationMarker = worldDataPath.resolve("migration.complete");
             if (!Files.exists(worldMigrationMarker)) {
+                boolean hasPreviousWorldData = Files.exists(previousWorldDataPath.resolve("balances.properties"))
+                        || Files.exists(previousWorldDataPath.resolve("claims.properties"))
+                        || Files.exists(previousWorldDataPath.resolve("claim-admins.properties"))
+                        || Files.exists(previousWorldDataPath.resolve("chests.properties"))
+                        || Files.isDirectory(previousWorldDataPath.resolve("characters"));
                 boolean hasFilesInWorldRoot = Files.exists(worldFolder.resolve("balances.properties"))
                         || Files.exists(worldFolder.resolve("claims.properties"))
+                        || Files.exists(worldFolder.resolve("claim-admins.properties"))
+                        || Files.exists(worldFolder.resolve("chests.properties"))
                         || Files.isDirectory(worldFolder.resolve("characters"));
-                Path legacySource = hasFilesInWorldRoot ? worldFolder : pluginPath;
+                Path legacySource = hasPreviousWorldData ? previousWorldDataPath
+                        : hasFilesInWorldRoot ? worldFolder : pluginPath;
                 Path globalMigrationMarker = pluginPath.resolve("legacy-data-world.txt");
-                boolean mayImportGlobalData = hasFilesInWorldRoot || !Files.exists(globalMigrationMarker);
+                boolean mayImportGlobalData = hasPreviousWorldData || hasFilesInWorldRoot
+                        || !Files.exists(globalMigrationMarker);
                 if (mayImportGlobalData) {
                     copyLegacyFile(legacySource.resolve("balances.properties"),
                         worldDataPath.resolve("balances.properties"));
@@ -209,9 +225,11 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                         worldDataPath.resolve("claims.properties"));
                     copyLegacyFile(legacySource.resolve("claim-admins.properties"),
                         worldDataPath.resolve("claim-admins.properties"));
+                    copyLegacyFile(legacySource.resolve("chests.properties"),
+                        worldDataPath.resolve("chests.properties"));
                     copyLegacyDirectory(legacySource.resolve("characters"),
                         worldDataPath.resolve("characters"));
-                    if (!hasFilesInWorldRoot) {
+                    if (!hasPreviousWorldData && !hasFilesInWorldRoot) {
                         Files.writeString(globalMigrationMarker, World.getName() + System.lineSeparator(),
                                 StandardCharsets.UTF_8);
                     }
@@ -440,24 +458,6 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                     openingSize, false, false)) {
                 event.getPlayer().sendTextMessage("<color=#AAAAAA>Auto-trim checking window geometry...</color>");
             }
-        } else if (!event.isCancelled()
-                && event.getObjectDefinition().type == net.risingworld.api.definitions.Objects.Type.Door) {
-            Vector3f reportedSize = event.getObjectDefinition().boundscale == null
-                    ? new Vector3f(1.2f, 2.15f, 0.15f)
-                    : event.getObjectDefinition().boundscale.mult(event.getScale());
-            Vector3f doorCenter = event.getPosition().copy();
-            Quaternion closedRotation = event.getRotation().copy();
-            long doorGlobalId = event.getGlobalID();
-            int doorChunkX = event.getChunkPositionX();
-            int doorChunkY = event.getChunkPositionY();
-            int doorChunkZ = event.getChunkPositionZ();
-            Player player = event.getPlayer();
-            player.sendTextMessage("<color=#AAAAAA>Auto-trim checking the door's opening arc...</color>");
-            executeDelayed(0.25f, () -> {
-                if (!player.isSpawned()) return;
-                doorTrimService.trim(player, doorGlobalId, doorChunkX, doorChunkY, doorChunkZ,
-                        doorCenter, closedRotation, reportedSize);
-            });
         }
     }
     @EventMethod public void onDestroyObject(PlayerDestroyObjectEvent event) {
