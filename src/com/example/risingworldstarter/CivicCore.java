@@ -20,6 +20,9 @@ import com.example.risingworldstarter.groups.Group;
 import com.example.risingworldstarter.groups.GroupMember;
 import com.example.risingworldstarter.groups.GroupRole;
 import com.example.risingworldstarter.groups.GroupService;
+import com.example.risingworldstarter.journal.JournalPage;
+import com.example.risingworldstarter.journal.JournalSection;
+import com.example.risingworldstarter.journal.JournalService;
 import net.risingworld.api.Plugin;
 import net.risingworld.api.Server;
 import net.risingworld.api.Timer;
@@ -35,6 +38,7 @@ import net.risingworld.api.events.player.PlayerDisconnectEvent;
 import net.risingworld.api.events.player.PlayerSpawnEvent;
 import net.risingworld.api.events.player.PlayerStorageAccessEvent;
 import net.risingworld.api.events.player.ui.PlayerUIElementClickEvent;
+import net.risingworld.api.events.player.ui.PlayerUIInputTextEvent;
 import net.risingworld.api.events.player.ui.PlayerUITextFieldChangeEvent;
 import net.risingworld.api.events.player.inventory.PlayerInventoryAddItemEvent;
 import net.risingworld.api.events.player.world.*;
@@ -55,6 +59,9 @@ import net.risingworld.api.ui.UITarget;
 import net.risingworld.api.ui.style.Pivot;
 import net.risingworld.api.ui.style.ScaleMode;
 import net.risingworld.api.ui.style.TextAnchor;
+import net.risingworld.api.ui.style.WhiteSpace;
+import net.risingworld.api.ui.style.Overflow;
+import net.risingworld.api.ui.style.Unit;
 import net.risingworld.api.utils.Utils;
 import net.risingworld.api.utils.Quaternion;
 import net.risingworld.api.utils.Vector3f;
@@ -111,6 +118,7 @@ public final class CivicCore extends Plugin implements Listener {
     private final Map<String, AdminView> adminViews = new ConcurrentHashMap<>();
     private final Map<String, AboutView> aboutViews = new ConcurrentHashMap<>();
     private final Map<String, CommandListView> commandListViews = new ConcurrentHashMap<>();
+    private final Map<String, JournalView> journalViews = new ConcurrentHashMap<>();
     private final Map<String, CharacterService.CharacterSummary> activeCharacters = new ConcurrentHashMap<>();
     private final Map<String, String> activeClaimIdentities = new ConcurrentHashMap<>();
     private final Map<String, CharacterSelectionView> characterSelectionViews = new ConcurrentHashMap<>();
@@ -130,6 +138,7 @@ public final class CivicCore extends Plugin implements Listener {
     private ClaimAdminService claimAdmins;
     private ChestService chests;
     private GroupService groups;
+    private JournalService journals;
     private EconomySettings economySettings;
     private StoreCatalog storeCatalog;
     private Path marketplaceConfigPath;
@@ -167,6 +176,7 @@ public final class CivicCore extends Plugin implements Listener {
         claimAdmins = new ClaimAdminService(database);
         chests = new ChestService(database);
         groups = new GroupService(database);
+        journals = new JournalService(database);
         characterService = new CharacterService(database);
         groups.migrateLegacy(worldDataPath.resolve("groups.properties"));
         if (LegacyStateMigrator.migrate(database, worldDataPath, databaseEconomy,
@@ -349,6 +359,13 @@ public final class CivicCore extends Plugin implements Listener {
         adminViews.clear();
         aboutViews.clear();
         commandListViews.clear();
+        if (journals != null) {
+            for (JournalView view : journalViews.values()) {
+                try { journals.savePage(view.characterKey(), view.pageId(), view.draft()); }
+                catch (RuntimeException exception) { System.err.println("[CivicCore] Could not save journal: " + exception.getMessage()); }
+            }
+        }
+        journalViews.clear();
         activeCharacters.clear();
         activeClaimIdentities.clear();
         characterSelectionViews.clear();
@@ -457,6 +474,8 @@ public final class CivicCore extends Plugin implements Listener {
         adminViews.remove(event.getPlayer().getUID());
         aboutViews.remove(event.getPlayer().getUID());
         commandListViews.remove(event.getPlayer().getUID());
+        JournalView journalView = journalViews.remove(event.getPlayer().getUID());
+        if (journalView != null) saveJournalPage(event.getPlayer(), journalView, false);
         characterSelectionViews.remove(event.getPlayer().getUID());
         appearanceViews.remove(event.getPlayer().getUID());
         claimProtectionNotices.remove(event.getPlayer().getUID());
@@ -802,6 +821,8 @@ public final class CivicCore extends Plugin implements Listener {
                 (player, parts) -> showCommands(player));
         registerCommand("General", "/about", "Show CivicCore information and version.", false, List.of(),
                 (player, parts) -> showAbout(player));
+        registerCommand("Character", "/journal", "Open your character journal.", true, List.of("/notes"),
+                (player, parts) -> toggleJournal(player));
         registerCommand("Character", "/characters", "Open the character selector.", true,
                 List.of("/character", "/chars"), (player, parts) -> openCharacterSwitcher(player));
         registerCommand("Character", "/syncappearance", "Copy your current profile appearance.", true, List.of(),
@@ -1054,6 +1075,161 @@ public final class CivicCore extends Plugin implements Listener {
         if (!anotherDialogOpen) {
             player.stopInput(false, false);
             player.setMouseCursorVisible(false);
+        }
+    }
+
+    private void toggleJournal(Player player) {
+        JournalView current = journalViews.get(player.getUID());
+        if (current != null) { closeJournal(player); return; }
+        if (storeViews.containsKey(player.getUID())) closeStore(player);
+        if (adminViews.containsKey(player.getUID())) closeAdminDashboard(player);
+        if (aboutViews.containsKey(player.getUID())) closeAbout(player);
+        if (commandListViews.containsKey(player.getUID())) closeCommands(player);
+        openJournal(player, null, 0);
+    }
+
+    private void openJournal(Player player, Long preferredSectionId, int preferredPageIndex) {
+        JournalView previous = journalViews.remove(player.getUID());
+        if (previous != null) player.removeUIElement(previous.window());
+        String characterKey = characterKey(player);
+        List<JournalSection> sections = journals.open(characterKey);
+        JournalSection section = sections.stream()
+                .filter(candidate -> preferredSectionId != null && candidate.id() == preferredSectionId)
+                .findFirst().orElse(sections.get(0));
+        List<JournalPage> pages = journals.getPages(characterKey, section.id());
+        int pageIndex = Math.max(0, Math.min(preferredPageIndex, pages.size() - 1));
+        JournalPage page = pages.get(pageIndex);
+
+        UIElement window = new UIElement();
+        window.setPosition(50f, 50f, true); window.setPivot(Pivot.MiddleCenter);
+        window.setSize(940f, 680f, false); window.setBackgroundColor((int) 0x171A20F8L);
+        window.setBorder(2f); window.setBorderColor((int) 0xC8A96AFFL);
+        window.setBorderEdgeRadius(8f, false);
+
+        UILabel title = new UILabel("Journal — " + section.title());
+        title.setPosition(24f, 14f, false); title.setSize(760f, 42f, false);
+        title.setFontSize(27f); title.setFontColor((int) 0xF4E3A1FFL);
+        title.setTextAlign(TextAnchor.MiddleLeft); window.addChild(title);
+
+        UILabel close = journalButton("X", 884f, 16f, 32f, 34f);
+        close.setBackgroundColor((int) 0x8B2D2DFFL); window.addChild(close);
+        UILabel newSection = journalButton("+ Section", 20f, 62f, 190f, 36f);
+        window.addChild(newSection);
+
+        UIScrollView sectionList = new UIScrollView(UIScrollView.ScrollViewMode.Vertical);
+        sectionList.setPosition(20f, 108f, false); sectionList.setSize(190f, 540f, false);
+        sectionList.setVerticalScrollerVisibility(UIScrollView.ScrollerVisibility.Auto);
+        sectionList.setHorizontalScrollerVisibility(UIScrollView.ScrollerVisibility.Hidden);
+        window.addChild(sectionList);
+        Map<Integer, Long> sectionsByButtonId = new ConcurrentHashMap<>();
+        float sectionY = 0f;
+        for (JournalSection item : sections) {
+            UILabel button = journalButton(item.title(), 0f, sectionY, 176f, 38f);
+            button.setBackgroundColor(item.id() == section.id() ? (int) 0x80652FFF : (int) 0x303844FFL);
+            sectionList.addChild(button); sectionsByButtonId.put(button.getID(), item.id());
+            sectionY += 44f;
+        }
+
+        UILabel pageLabel = new UILabel("Page " + (pageIndex + 1) + " of " + pages.size());
+        pageLabel.setPosition(240f, 62f, false); pageLabel.setSize(660f, 36f, false);
+        pageLabel.setFontSize(17f); pageLabel.setFontColor((int) 0xD8CBAAFFL);
+        pageLabel.setTextAlign(TextAnchor.MiddleCenter); window.addChild(pageLabel);
+
+        UITextField editor = new UITextField(page.content());
+        editor.setPosition(240f, 108f, false); editor.setSize(670f, 475f, false);
+        editor.setMaxCharacters(JournalService.MAX_PAGE_CHARACTERS);
+        editor.setFontSize(17f); editor.setFontColor((int) 0xEEEEEEFFL);
+        editor.setBackgroundColor((int) 0x222832FFL); editor.setBorder(1f);
+        editor.setBorderColor((int) 0x6D7785FFL);
+        editor.style.whiteSpace.set(WhiteSpace.Normal);
+        editor.style.textAlign.set(TextAnchor.UpperLeft);
+        editor.style.overflow.set(Overflow.Hidden);
+        editor.style.paddingLeft.set(12f, Unit.Pixel);
+        editor.style.paddingRight.set(12f, Unit.Pixel);
+        editor.style.paddingTop.set(12f, Unit.Pixel);
+        editor.style.paddingBottom.set(12f, Unit.Pixel);
+        editor.style.minHeight.set(475f, Unit.Pixel);
+        editor.style.maxHeight.set(475f, Unit.Pixel);
+        editor.updateStyle();
+        window.addChild(editor);
+
+        UILabel previousPage = journalButton("< Previous", 240f, 600f, 130f, 40f);
+        UILabel nextPage = journalButton("Next >", 380f, 600f, 130f, 40f);
+        UILabel newPage = journalButton("+ Page", 600f, 600f, 120f, 40f);
+        UILabel save = journalButton("Save", 730f, 600f, 180f, 40f);
+        save.setBackgroundColor((int) 0x2E7D4FFF);
+        previousPage.setClickable(pageIndex > 0); nextPage.setClickable(pageIndex + 1 < pages.size());
+        window.addChild(previousPage); window.addChild(nextPage); window.addChild(newPage); window.addChild(save);
+
+        JournalView view = new JournalView(window, close, newSection, previousPage, nextPage,
+                newPage, save, editor, characterKey, section.id(), page.id(), pageIndex,
+                pages.size(), page.content(), sectionsByButtonId);
+        journalViews.put(player.getUID(), view);
+        player.addUIElement(window);
+        // UITextField's internal Unity control is created when the window is
+        // attached. Switching modes afterward ensures the client creates a
+        // multiline editor instead of stretching a single-line input shell.
+        editor.setMultiLine(true);
+        player.stopInput(true, true); player.setMouseCursorVisible(true);
+    }
+
+    private static UILabel journalButton(String text, float x, float y, float width, float height) {
+        UILabel button = new UILabel(text); button.setPosition(x, y, false); button.setSize(width, height, false);
+        button.setFontSize(16f); button.setFontColor((int) 0xFFFFFFFFL);
+        button.setTextAlign(TextAnchor.MiddleCenter); button.setBackgroundColor((int) 0x3A4655FFL);
+        button.setBorderEdgeRadius(4f, false); button.setClickable(true); return button;
+    }
+
+    private void saveJournalPage(Player player, JournalView view, boolean notify) {
+        try {
+            journals.savePage(view.characterKey(), view.pageId(), view.draft());
+            if (notify) player.sendTextMessage("<color=#77FF99>Journal page saved.</color>");
+        } catch (RuntimeException exception) {
+            player.sendTextMessage("<color=#FF7777>Could not save journal page: " + exception.getMessage() + "</color>");
+        }
+    }
+
+    private void closeJournal(Player player) {
+        JournalView view = journalViews.remove(player.getUID());
+        if (view == null) return;
+        saveJournalPage(player, view, false); player.removeUIElement(view.window());
+        boolean anotherDialogOpen = aboutViews.containsKey(player.getUID())
+                || commandListViews.containsKey(player.getUID()) || characterSelectionViews.containsKey(player.getUID())
+                || appearanceViews.containsKey(player.getUID()) || adminViews.containsKey(player.getUID())
+                || storeViews.containsKey(player.getUID());
+        if (!anotherDialogOpen) { player.stopInput(false, false); player.setMouseCursorVisible(false); }
+    }
+
+    private void handleJournalClick(Player player, JournalView view, int elementId) {
+        if (elementId == view.close().getID()) { closeJournal(player); return; }
+        if (elementId == view.save().getID()) { saveJournalPage(player, view, true); return; }
+        if (elementId == view.newSection().getID()) {
+            saveJournalPage(player, view, false);
+            player.showInputMessageBox("New journal section", "Section name", "", name -> {
+                if (name == null) return;
+                try {
+                    JournalSection section = journals.createSection(view.characterKey(), name);
+                    openJournal(player, section.id(), 0);
+                } catch (RuntimeException exception) {
+                    player.showErrorMessageBox("Could not create section", exception.getMessage());
+                }
+            });
+            return;
+        }
+        Long sectionId = view.sectionsByButtonId().get(elementId);
+        if (sectionId != null && sectionId != view.sectionId()) {
+            saveJournalPage(player, view, false); openJournal(player, sectionId, 0); return;
+        }
+        if (elementId == view.newPage().getID()) {
+            saveJournalPage(player, view, false);
+            journals.createPage(view.characterKey(), view.sectionId());
+            openJournal(player, view.sectionId(), view.pageCount()); return;
+        }
+        if (elementId == view.previousPage().getID() && view.pageIndex() > 0) {
+            saveJournalPage(player, view, false); openJournal(player, view.sectionId(), view.pageIndex() - 1); return;
+        }
+        if (elementId == view.nextPage().getID() && view.pageIndex() + 1 < view.pageCount()) {
+            saveJournalPage(player, view, false); openJournal(player, view.sectionId(), view.pageIndex() + 1);
         }
     }
 
@@ -1825,6 +2001,7 @@ public final class CivicCore extends Plugin implements Listener {
                     try {
                         CharacterService.CharacterSummary active = activeCharacters.get(player.getUID());
                         characterService.deleteCharacter(player.getUID(), character);
+                        journals.deleteJournal(character.economyKey());
                         groups.removeDeletedCharacter(character.economyKey());
                         int removedClaims = claims.deleteClaimsByOwner(character.economyKey());
                         economy.deleteAccount(character.economyKey());
@@ -2579,6 +2756,11 @@ public final class CivicCore extends Plugin implements Listener {
     @EventMethod
     public void onStoreClick(PlayerUIElementClickEvent event) {
         Player player = event.getPlayer();
+        JournalView journalView = journalViews.get(player.getUID());
+        if (journalView != null) {
+            handleJournalClick(player, journalView, event.getUIElement().getID());
+            return;
+        }
         CommandListView commandListView = commandListViews.get(player.getUID());
         if (commandListView != null) {
             if (event.getUIElement().getID() == commandListView.closeButton().getID()) {
@@ -2709,6 +2891,11 @@ public final class CivicCore extends Plugin implements Listener {
 
     @EventMethod
     public void onStoreSearchChanged(PlayerUITextFieldChangeEvent event) {
+        JournalView journalView = journalViews.get(event.getPlayer().getUID());
+        if (journalView != null && event.getUITextField().getID() == journalView.editor().getID()) {
+            journalView.setDraft(event.getNewText() == null ? "" : event.getNewText());
+            return;
+        }
         StoreView view = storeViews.get(event.getPlayer().getUID());
         if (view == null || event.getUITextField().getID() != view.searchField().getID()) {
             return;
@@ -2716,6 +2903,13 @@ public final class CivicCore extends Plugin implements Listener {
         String search = event.getNewText() == null ? "" : event.getNewText();
         view.setSearchText(search.trim().toLowerCase(Locale.US));
         rebuildStoreItems(view);
+    }
+
+    @EventMethod
+    public void onJournalTextInput(PlayerUIInputTextEvent event) {
+        JournalView view = journalViews.get(event.getPlayer().getUID());
+        if (view != null && event.getUITextField().getID() == view.editor().getID())
+            view.setDraft(event.getText() == null ? "" : event.getText());
     }
 
     private static final class StoreView {
@@ -2783,6 +2977,51 @@ public final class CivicCore extends Plugin implements Listener {
     }
 
     private record CommandListView(UIElement window, UILabel closeButton) {
+    }
+
+    private static final class JournalView {
+        private final UIElement window;
+        private final UILabel close;
+        private final UILabel newSection;
+        private final UILabel previousPage;
+        private final UILabel nextPage;
+        private final UILabel newPage;
+        private final UILabel save;
+        private final UITextField editor;
+        private final String characterKey;
+        private final long sectionId;
+        private final long pageId;
+        private final int pageIndex;
+        private final int pageCount;
+        private final Map<Integer, Long> sectionsByButtonId;
+        private String draft;
+
+        private JournalView(UIElement window, UILabel close, UILabel newSection, UILabel previousPage,
+                            UILabel nextPage, UILabel newPage, UILabel save, UITextField editor,
+                            String characterKey, long sectionId, long pageId, int pageIndex,
+                            int pageCount, String draft, Map<Integer, Long> sectionsByButtonId) {
+            this.window = window; this.close = close; this.newSection = newSection;
+            this.previousPage = previousPage; this.nextPage = nextPage; this.newPage = newPage;
+            this.save = save; this.editor = editor; this.characterKey = characterKey;
+            this.sectionId = sectionId; this.pageId = pageId; this.pageIndex = pageIndex;
+            this.pageCount = pageCount; this.draft = draft; this.sectionsByButtonId = sectionsByButtonId;
+        }
+        private UIElement window() { return window; }
+        private UILabel close() { return close; }
+        private UILabel newSection() { return newSection; }
+        private UILabel previousPage() { return previousPage; }
+        private UILabel nextPage() { return nextPage; }
+        private UILabel newPage() { return newPage; }
+        private UILabel save() { return save; }
+        private UITextField editor() { return editor; }
+        private String characterKey() { return characterKey; }
+        private long sectionId() { return sectionId; }
+        private long pageId() { return pageId; }
+        private int pageIndex() { return pageIndex; }
+        private int pageCount() { return pageCount; }
+        private String draft() { return draft; }
+        private void setDraft(String draft) { this.draft = draft; }
+        private Map<Integer, Long> sectionsByButtonId() { return sectionsByButtonId; }
     }
 
     private record CharacterSelectionView(UIElement window,
