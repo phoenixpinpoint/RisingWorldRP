@@ -72,3 +72,22 @@ CREATE TABLE IF NOT EXISTS group_invitations (
     character_key TEXT PRIMARY KEY,
     group_id TEXT NOT NULL REFERENCES groups (group_id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS journal_sections (
+    section_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    character_key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    section_order INTEGER NOT NULL,
+    UNIQUE (character_key, section_order)
+);
+
+CREATE INDEX IF NOT EXISTS journal_sections_character_idx
+    ON journal_sections (character_key, section_order);
+
+CREATE TABLE IF NOT EXISTS journal_pages (
+    page_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    section_id INTEGER NOT NULL REFERENCES journal_sections (section_id) ON DELETE CASCADE,
+    page_number INTEGER NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    UNIQUE (section_id, page_number)
+);
