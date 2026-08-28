@@ -5,11 +5,11 @@ This package contains CivicCore's persistent, character-scoped economy.
 ## Components
 
 - `EconomyApi` is the public balance contract for CivicCore and other plugins.
-- `FileEconomyService` implements the API with atomic properties-file storage.
+- `DatabaseEconomyService` implements the API through the shared database contract.
 - `EconomySettings` loads starting cash, claim cost, and salary configuration.
 
-Amounts use integer minor units (cents). Balances are stored in
-`Worlds/<world>/CivicCore/balances.properties`. New accounts default to
+Amounts use integer minor units (cents). Balances are stored in the world-scoped
+database. New accounts default to
 `$25,000.00`; a chunk costs `$10,000.00`; and the default eight-hour salary is
 `$1,000.00`.
 

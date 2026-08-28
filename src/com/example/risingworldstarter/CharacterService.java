@@ -1,5 +1,6 @@
 package com.example.risingworldstarter;
 
+import com.example.risingworldstarter.database.Database;
 import net.risingworld.api.Server;
 import net.risingworld.api.objects.Player;
 import net.risingworld.api.objects.Skin;
@@ -7,285 +8,53 @@ import net.risingworld.api.utils.Quaternion;
 import net.risingworld.api.utils.Vector3f;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import java.io.StringReader;
+import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
 
 final class CharacterService {
-    static final int MAX_SLOTS = 4;
-    private final Path root;
+    static final int MAX_SLOTS=4;
+    private final Database database;
+    CharacterService(Database database){this.database=database;}
 
-    CharacterService(Path root) {
-        this.root = root;
-    }
+    List<CharacterSummary> getCharacters(String accountUid){return database.read(connection->{List<CharacterSummary> result=new ArrayList<>();try(PreparedStatement query=connection.prepareStatement("SELECT c.slot,c.character_id,c.name,a.profile_name FROM characters c JOIN accounts a ON a.account_uid=c.account_uid WHERE c.account_uid=? ORDER BY c.slot")){query.setString(1,accountUid);try(ResultSet rows=query.executeQuery()){while(rows.next())result.add(new CharacterSummary(rows.getInt(1),rows.getString(2),rows.getString(3),rows.getString(4)));}}return List.copyOf(result);});}
 
-    List<CharacterSummary> getCharacters(String accountUid) {
-        Properties account = loadProperties(accountFile(accountUid));
-        String profileName = account.getProperty("profile-name", "Unknown");
-        List<CharacterSummary> result = new ArrayList<>();
-        for (int slot = 1; slot <= MAX_SLOTS; slot++) {
-            String id = account.getProperty("slot." + slot + ".id");
-            String name = account.getProperty("slot." + slot + ".name");
-            if (id != null && name != null) {
-                result.add(new CharacterSummary(slot, id, name, profileName));
-            }
-        }
-        return result;
-    }
+    CharacterSummary ensureLegacyCharacter(Player player){List<CharacterSummary> existing=getCharacters(player.getUID());if(!existing.isEmpty())return existing.get(0);CharacterSummary legacy=createSummary(player.getUID(),player.getName(),player.getName(),1);saveCharacter(player,legacy);return legacy;}
 
-    CharacterSummary ensureLegacyCharacter(Player player) {
-        List<CharacterSummary> existing = getCharacters(player.getUID());
-        if (!existing.isEmpty()) {
-            return existing.get(0);
-        }
-        CharacterSummary legacy = createSummary(player.getUID(), player.getName(), player.getName(), 1);
-        saveCharacter(player, legacy);
-        return legacy;
-    }
+    void captureProfileAppearance(Player player){Properties profile=loadAccountProfile(player.getUID());Skin skin=player.getSkin();profile.setProperty("profile-skin.gender",skin.getGender().name());profile.setProperty("profile-skin.color",Integer.toString(skin.getSkinColor()));profile.setProperty("profile-skin.hair-color",Integer.toString(skin.getHairColor()));profile.setProperty("profile-skin.eye-color",Integer.toString(skin.getEyeColor()));profile.setProperty("profile-skin.hairstyle",Byte.toString(skin.getHairstyle()));profile.setProperty("profile-skin.beard",Byte.toString(skin.getBeard()));profile.setProperty("profile-skin.variation",Byte.toString(skin.getVariation()));saveAccount(player.getUID(),player.getName(),profile);}
 
-    void captureProfileAppearance(Player player) {
-        Properties account = loadProperties(accountFile(player.getUID()));
-        Skin skin = player.getSkin();
-        account.setProperty("profile-skin.gender", skin.getGender().name());
-        account.setProperty("profile-skin.color", Integer.toString(skin.getSkinColor()));
-        account.setProperty("profile-skin.hair-color", Integer.toString(skin.getHairColor()));
-        account.setProperty("profile-skin.eye-color", Integer.toString(skin.getEyeColor()));
-        account.setProperty("profile-skin.hairstyle", Byte.toString(skin.getHairstyle()));
-        account.setProperty("profile-skin.beard", Byte.toString(skin.getBeard()));
-        account.setProperty("profile-skin.variation", Byte.toString(skin.getVariation()));
-        saveProperties(accountFile(player.getUID()), account);
-    }
+    boolean applyProfileAppearance(Player player){Properties profile=loadAccountProfile(player.getUID());if(!profile.containsKey("profile-skin.gender"))return false;Skin skin=player.getSkin();skin.setGender(Skin.Gender.valueOf(profile.getProperty("profile-skin.gender")));skin.setSkinColor(Integer.parseInt(profile.getProperty("profile-skin.color")));skin.setHairColor(Integer.parseInt(profile.getProperty("profile-skin.hair-color")));skin.setEyeColor(Integer.parseInt(profile.getProperty("profile-skin.eye-color")));skin.setHairstyle(Byte.parseByte(profile.getProperty("profile-skin.hairstyle")));skin.setBeard(Byte.parseByte(profile.getProperty("profile-skin.beard")));skin.setVariation(Byte.parseByte(profile.getProperty("profile-skin.variation")));return true;}
 
-    boolean applyProfileAppearance(Player player) {
-        Properties account = loadProperties(accountFile(player.getUID()));
-        if (!account.containsKey("profile-skin.gender")) return false;
-        Skin skin = player.getSkin();
-        skin.setGender(Skin.Gender.valueOf(account.getProperty("profile-skin.gender")));
-        skin.setSkinColor(Integer.parseInt(account.getProperty("profile-skin.color")));
-        skin.setHairColor(Integer.parseInt(account.getProperty("profile-skin.hair-color")));
-        skin.setEyeColor(Integer.parseInt(account.getProperty("profile-skin.eye-color")));
-        skin.setHairstyle(Byte.parseByte(account.getProperty("profile-skin.hairstyle")));
-        skin.setBeard(Byte.parseByte(account.getProperty("profile-skin.beard")));
-        skin.setVariation(Byte.parseByte(account.getProperty("profile-skin.variation")));
-        return true;
-    }
+    CharacterSummary createCharacter(Player player,String requestedName,int slot){String name=requireCharacterName(requestedName);List<CharacterSummary> existing=getCharacters(player.getUID());if(existing.size()>=MAX_SLOTS)throw new IllegalStateException("All four character slots are occupied");if(slot<1||slot>MAX_SLOTS||existing.stream().anyMatch(character->character.slot()==slot))throw new IllegalArgumentException("That character slot is not available");if(existing.stream().anyMatch(character->character.name().equalsIgnoreCase(name)))throw new IllegalArgumentException("You already have a character with that name");String profileName=existing.isEmpty()?player.getName():existing.get(0).profileName();CharacterSummary created=createSummary(player.getUID(),profileName,name,slot);Vector3f spawn=resetPlayerForNewCharacter(player,name);saveCharacter(player,created,spawn,Quaternion.IDENTITY);return created;}
 
-    CharacterSummary createCharacter(Player player, String requestedName, int slot) {
-        String name = requireCharacterName(requestedName);
-        List<CharacterSummary> existing = getCharacters(player.getUID());
-        if (existing.size() >= MAX_SLOTS) {
-            throw new IllegalStateException("All four character slots are occupied");
-        }
-        if (slot < 1 || slot > MAX_SLOTS
-                || existing.stream().anyMatch(character -> character.slot() == slot)) {
-            throw new IllegalArgumentException("That character slot is not available");
-        }
-        if (existing.stream().anyMatch(character -> character.name().equalsIgnoreCase(name))) {
-            throw new IllegalArgumentException("You already have a character with that name");
-        }
-        String profileName = existing.isEmpty() ? player.getName() : existing.get(0).profileName();
-        CharacterSummary created = createSummary(player.getUID(), profileName, name, slot);
-        Vector3f spawn = resetPlayerForNewCharacter(player, name);
-        // setPosition() is synchronized with the game asynchronously. Persist
-        // the known spawn coordinates explicitly instead of immediately reading
-        // player.getPosition(), which may still contain the previous character's
-        // location at this point.
-        saveCharacter(player, created, spawn, Quaternion.IDENTITY);
-        return created;
-    }
+    void deleteCharacter(String accountUid,CharacterSummary character){database.write(connection->{try(PreparedStatement delete=connection.prepareStatement("DELETE FROM characters WHERE account_uid=? AND slot=? AND character_id=?")){delete.setString(1,accountUid);delete.setInt(2,character.slot());delete.setString(3,character.id());if(delete.executeUpdate()==0)throw new IllegalStateException("That character slot has changed; reopen the character menu");}return null;});}
+    void saveCharacter(Player player,CharacterSummary character){saveCharacter(player,character,null,null);}
 
-    void deleteCharacter(String accountUid, CharacterSummary character) {
-        Properties account = loadProperties(accountFile(accountUid));
-        String slotPrefix = "slot." + character.slot() + ".";
-        if (!character.id().equals(account.getProperty(slotPrefix + "id"))) {
-            throw new IllegalStateException("That character slot has changed; reopen the character menu");
-        }
+    private void saveCharacter(Player player,CharacterSummary character,Vector3f positionOverride,Quaternion rotationOverride){Properties state=new Properties();state.setProperty("name",character.name());Vector3f position=positionOverride==null?player.getPosition():positionOverride;Quaternion rotation=rotationOverride==null?player.getRotation():rotationOverride;state.setProperty("position",position.x+","+position.y+","+position.z);state.setProperty("rotation",rotation.x+","+rotation.y+","+rotation.z+","+rotation.w);Skin skin=player.getSkin();state.setProperty("skin.gender",skin.getGender().name());state.setProperty("skin.color",Integer.toString(skin.getSkinColor()));state.setProperty("skin.hair-color",Integer.toString(skin.getHairColor()));state.setProperty("skin.eye-color",Integer.toString(skin.getEyeColor()));state.setProperty("skin.hairstyle",Byte.toString(skin.getHairstyle()));state.setProperty("skin.beard",Byte.toString(skin.getBeard()));state.setProperty("skin.variation",Byte.toString(skin.getVariation()));state.setProperty("status.max-health",Integer.toString(player.getMaxHealth()));state.setProperty("status.health",Integer.toString(player.getHealth()));state.setProperty("status.hunger",Integer.toString(player.getHunger()));state.setProperty("status.thirst",Integer.toString(player.getThirst()));state.setProperty("status.max-stamina",Integer.toString(player.getMaxStamina()));state.setProperty("status.stamina",Integer.toString(player.getStamina()));state.setProperty("status.broken-bones",Boolean.toString(player.hasBrokenBones()));state.setProperty("status.bleeding",Boolean.toString(player.isBleeding()));byte[] inventory=player.getInventory().serialize(),clothes=player.getClothes().serialize();String serialized=serialize(state);database.write(connection->{try(PreparedStatement update=connection.prepareStatement("UPDATE characters SET name=?,state=?,inventory=?,clothes=? WHERE character_id=? AND account_uid=?")){update.setString(1,character.name());update.setString(2,serialized);update.setBytes(3,inventory);update.setBytes(4,clothes);update.setString(5,character.id());update.setString(6,player.getUID());if(update.executeUpdate()==0)throw new IllegalStateException("Character is not present in the database: "+character.name());}return null;});}
 
-        Path directory = characterDirectory(accountUid, character.id());
-        if (Files.exists(directory)) {
-            try (var paths = Files.walk(directory)) {
-                for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
-                    Files.deleteIfExists(path);
-                }
-            } catch (IOException exception) {
-                throw new IllegalStateException("Could not delete character " + character.name(), exception);
-            }
-        }
-        account.remove(slotPrefix + "id");
-        account.remove(slotPrefix + "name");
-        saveProperties(accountFile(accountUid), account);
-    }
+    void loadCharacter(Player player,CharacterSummary character){CharacterData data=database.read(connection->{try(PreparedStatement query=connection.prepareStatement("SELECT state,inventory,clothes FROM characters WHERE character_id=? AND account_uid=?")){query.setString(1,character.id());query.setString(2,player.getUID());try(ResultSet result=query.executeQuery()){if(!result.next())throw new IllegalStateException("Character is not present in the database: "+character.name());return new CharacterData(parse(result.getString(1)),result.getBytes(2),result.getBytes(3));}}});Properties state=data.state();player.setName(character.name());if(data.inventory()!=null)player.getInventory().deserialize(data.inventory());if(data.clothes()!=null)player.getClothes().deserialize(data.clothes());Skin skin=player.getSkin();skin.setGender(Skin.Gender.valueOf(state.getProperty("skin.gender","Male")));skin.setSkinColor(Integer.parseInt(state.getProperty("skin.color","0")));skin.setHairColor(Integer.parseInt(state.getProperty("skin.hair-color","0")));skin.setEyeColor(Integer.parseInt(state.getProperty("skin.eye-color","0")));skin.setHairstyle(Byte.parseByte(state.getProperty("skin.hairstyle","0")));skin.setBeard(Byte.parseByte(state.getProperty("skin.beard","0")));skin.setVariation(Byte.parseByte(state.getProperty("skin.variation","0")));player.setMaxHealth(Integer.parseInt(state.getProperty("status.max-health",Integer.toString(player.getMaxHealth()))));player.setHealth(Integer.parseInt(state.getProperty("status.health",Integer.toString(player.getMaxHealth()))));player.setHunger(Integer.parseInt(state.getProperty("status.hunger","100")));player.setThirst(Integer.parseInt(state.getProperty("status.thirst","100")));player.setMaxStamina(Integer.parseInt(state.getProperty("status.max-stamina",Integer.toString(player.getMaxStamina()))));player.setStamina(Integer.parseInt(state.getProperty("status.stamina",Integer.toString(player.getMaxStamina()))));player.setBrokenBones(Boolean.parseBoolean(state.getProperty("status.broken-bones","false")));player.setBleeding(Boolean.parseBoolean(state.getProperty("status.bleeding","false")));player.getInventory().syncWithClient();float[] position=parseFloats(state.getProperty("position"),3),rotation=parseFloats(state.getProperty("rotation"),4);if(position!=null)player.setPosition(position[0],position[1],position[2]);if(rotation!=null)player.setRotation(new Quaternion(rotation[0],rotation[1],rotation[2],rotation[3]));}
 
-    void saveCharacter(Player player, CharacterSummary character) {
-        saveCharacter(player, character, null, null);
-    }
+    void migrateLegacy(Path root){if(!Files.isDirectory(root))return;try(var accounts=Files.list(root)){for(Path accountDirectory:accounts.filter(Files::isDirectory).toList()){String accountUid;try{accountUid=new String(Base64.getUrlDecoder().decode(accountDirectory.getFileName().toString()),StandardCharsets.UTF_8);}catch(IllegalArgumentException ignored){continue;}Properties account=loadFile(accountDirectory.resolve("account.properties"));String profileName=account.getProperty("profile-name","Unknown");Properties profile=new Properties();account.stringPropertyNames().stream().filter(key->key.startsWith("profile-")).forEach(key->profile.setProperty(key,account.getProperty(key)));saveAccount(accountUid,profileName,profile);for(int slot=1;slot<=MAX_SLOTS;slot++){String id=account.getProperty("slot."+slot+".id"),name=account.getProperty("slot."+slot+".name");if(id==null||name==null)continue;Path directory=accountDirectory.resolve(id);Properties state=loadFile(directory.resolve("state.properties"));byte[] inventory=readBytes(directory.resolve("inventory.bin")),clothes=readBytes(directory.resolve("clothes.bin"));int finalSlot=slot;database.write(connection->{try(PreparedStatement insert=connection.prepareStatement("INSERT INTO characters(character_id,account_uid,slot,name,state,inventory,clothes) VALUES(?,?,?,?,?,?,?) ON CONFLICT(character_id) DO NOTHING")){insert.setString(1,id);insert.setString(2,accountUid);insert.setInt(3,finalSlot);insert.setString(4,name);insert.setString(5,serialize(state));insert.setBytes(6,inventory);insert.setBytes(7,clothes);insert.executeUpdate();}return null;});}}}catch(IOException exception){throw new IllegalStateException("Could not migrate legacy characters",exception);}}
 
-    private void saveCharacter(Player player, CharacterSummary character,
-                               Vector3f positionOverride, Quaternion rotationOverride) {
-        Path directory = characterDirectory(player.getUID(), character.id());
-        Properties state = new Properties();
-        state.setProperty("name", character.name());
-        Vector3f position = positionOverride == null ? player.getPosition() : positionOverride;
-        Quaternion rotation = rotationOverride == null ? player.getRotation() : rotationOverride;
-        state.setProperty("position", position.x + "," + position.y + "," + position.z);
-        state.setProperty("rotation", rotation.x + "," + rotation.y + "," + rotation.z + "," + rotation.w);
-        Skin skin = player.getSkin();
-        state.setProperty("skin.gender", skin.getGender().name());
-        state.setProperty("skin.color", Integer.toString(skin.getSkinColor()));
-        state.setProperty("skin.hair-color", Integer.toString(skin.getHairColor()));
-        state.setProperty("skin.eye-color", Integer.toString(skin.getEyeColor()));
-        state.setProperty("skin.hairstyle", Byte.toString(skin.getHairstyle()));
-        state.setProperty("skin.beard", Byte.toString(skin.getBeard()));
-        state.setProperty("skin.variation", Byte.toString(skin.getVariation()));
-        state.setProperty("status.max-health", Integer.toString(player.getMaxHealth()));
-        state.setProperty("status.health", Integer.toString(player.getHealth()));
-        state.setProperty("status.hunger", Integer.toString(player.getHunger()));
-        state.setProperty("status.thirst", Integer.toString(player.getThirst()));
-        state.setProperty("status.max-stamina", Integer.toString(player.getMaxStamina()));
-        state.setProperty("status.stamina", Integer.toString(player.getStamina()));
-        state.setProperty("status.broken-bones", Boolean.toString(player.hasBrokenBones()));
-        state.setProperty("status.bleeding", Boolean.toString(player.isBleeding()));
-        saveProperties(directory.resolve("state.properties"), state);
-        try {
-            Files.createDirectories(directory);
-            Files.write(directory.resolve("inventory.bin"), player.getInventory().serialize());
-            Files.write(directory.resolve("clothes.bin"), player.getClothes().serialize());
-        } catch (IOException exception) {
-            throw new IllegalStateException("Could not save character " + character.name(), exception);
-        }
-    }
-
-    void loadCharacter(Player player, CharacterSummary character) {
-        Path directory = characterDirectory(player.getUID(), character.id());
-        Properties state = loadProperties(directory.resolve("state.properties"));
-        player.setName(character.name());
-        try {
-            Path inventory = directory.resolve("inventory.bin");
-            if (Files.exists(inventory)) player.getInventory().deserialize(Files.readAllBytes(inventory));
-            Path clothes = directory.resolve("clothes.bin");
-            if (Files.exists(clothes)) player.getClothes().deserialize(Files.readAllBytes(clothes));
-        } catch (IOException exception) {
-            throw new IllegalStateException("Could not load character " + character.name(), exception);
-        }
-        Skin skin = player.getSkin();
-        skin.setGender(Skin.Gender.valueOf(state.getProperty("skin.gender", "Male")));
-        skin.setSkinColor(Integer.parseInt(state.getProperty("skin.color", "0")));
-        skin.setHairColor(Integer.parseInt(state.getProperty("skin.hair-color", "0")));
-        skin.setEyeColor(Integer.parseInt(state.getProperty("skin.eye-color", "0")));
-        skin.setHairstyle(Byte.parseByte(state.getProperty("skin.hairstyle", "0")));
-        skin.setBeard(Byte.parseByte(state.getProperty("skin.beard", "0")));
-        skin.setVariation(Byte.parseByte(state.getProperty("skin.variation", "0")));
-        player.setMaxHealth(Integer.parseInt(state.getProperty("status.max-health",
-                Integer.toString(player.getMaxHealth()))));
-        player.setHealth(Integer.parseInt(state.getProperty("status.health",
-                Integer.toString(player.getMaxHealth()))));
-        player.setHunger(Integer.parseInt(state.getProperty("status.hunger", "100")));
-        player.setThirst(Integer.parseInt(state.getProperty("status.thirst", "100")));
-        player.setMaxStamina(Integer.parseInt(state.getProperty("status.max-stamina",
-                Integer.toString(player.getMaxStamina()))));
-        player.setStamina(Integer.parseInt(state.getProperty("status.stamina",
-                Integer.toString(player.getMaxStamina()))));
-        player.setBrokenBones(Boolean.parseBoolean(state.getProperty("status.broken-bones", "false")));
-        player.setBleeding(Boolean.parseBoolean(state.getProperty("status.bleeding", "false")));
-        player.getInventory().syncWithClient();
-        float[] position = parseFloats(state.getProperty("position"), 3);
-        float[] rotation = parseFloats(state.getProperty("rotation"), 4);
-        if (position != null) player.setPosition(position[0], position[1], position[2]);
-        if (rotation != null) player.setRotation(new Quaternion(rotation[0], rotation[1], rotation[2], rotation[3]));
-    }
-
-    private CharacterSummary createSummary(String accountUid, String profileName, String characterName, int slot) {
-        Properties account = loadProperties(accountFile(accountUid));
-        account.setProperty("profile-name", profileName);
-        String id = UUID.randomUUID().toString();
-        account.setProperty("slot." + slot + ".id", id);
-        account.setProperty("slot." + slot + ".name", characterName);
-        saveProperties(accountFile(accountUid), account);
-        return new CharacterSummary(slot, id, characterName, profileName);
-    }
-
-    private Vector3f resetPlayerForNewCharacter(Player player, String characterName) {
-        player.setName(characterName);
-        player.getInventory().clear();
-        player.getInventory().syncWithClient();
-        player.getClothes().removeAll();
-        // New characters inherit the full appearance captured from Rising
-        // World's native profile editor, including facial variation values the
-        // server API cannot set interactively in a dependable way.
-        applyProfileAppearance(player);
-        player.setHealth(player.getMaxHealth());
-        player.setHunger(100);
-        player.setThirst(100);
-        player.setStamina(player.getMaxStamina());
-        player.setBrokenBones(false);
-        player.setBleeding(false);
-        Vector3f spawn = Server.getDefaultSpawnPosition();
-        player.setPosition(spawn);
-        player.setRotation(Quaternion.IDENTITY);
-        return spawn;
-    }
-
-    private Path accountDirectory(String uid) {
-        String encoded = Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(uid.getBytes(StandardCharsets.UTF_8));
-        return root.resolve(encoded);
-    }
-
-    private Path accountFile(String uid) { return accountDirectory(uid).resolve("account.properties"); }
-    private Path characterDirectory(String uid, String id) { return accountDirectory(uid).resolve(id); }
-
-    private static String requireCharacterName(String value) {
-        String name = value == null ? "" : value.trim();
-        if (!name.matches("[A-Za-z][A-Za-z0-9 _'-]{2,23}")) {
-            throw new IllegalArgumentException("Character names must be 3-24 characters and start with a letter");
-        }
-        return name;
-    }
-
-    private static float[] parseFloats(String value, int expected) {
-        if (value == null) return null;
-        String[] parts = value.split(",");
-        if (parts.length != expected) return null;
-        try {
-            float[] result = new float[expected];
-            for (int index = 0; index < expected; index++) result[index] = Float.parseFloat(parts[index]);
-            return result;
-        } catch (NumberFormatException ignored) {
-            return null;
-        }
-    }
-
-    private static Properties loadProperties(Path path) {
-        Properties properties = new Properties();
-        if (!Files.exists(path)) return properties;
-        try (InputStream input = Files.newInputStream(path)) {
-            properties.load(input);
-            return properties;
-        } catch (IOException exception) {
-            throw new IllegalStateException("Could not load " + path, exception);
-        }
-    }
-
-    private static void saveProperties(Path path, Properties properties) {
-        try {
-            Files.createDirectories(path.getParent());
-            try (OutputStream output = Files.newOutputStream(path)) {
-                properties.store(output, "Rising World character data");
-            }
-        } catch (IOException exception) {
-            throw new IllegalStateException("Could not save " + path, exception);
-        }
-    }
-
-    record CharacterSummary(int slot, String id, String name, String profileName) {
-        String economyKey() { return "character:" + id; }
-    }
+    private CharacterSummary createSummary(String accountUid,String profileName,String name,int slot){String id=UUID.randomUUID().toString();database.write(connection->{try(PreparedStatement account=connection.prepareStatement("INSERT INTO accounts(account_uid,profile_name,profile_state) VALUES(?,?,?) ON CONFLICT(account_uid) DO UPDATE SET profile_name=excluded.profile_name")){account.setString(1,accountUid);account.setString(2,profileName);account.setString(3,"");account.executeUpdate();}try(PreparedStatement character=connection.prepareStatement("INSERT INTO characters(character_id,account_uid,slot,name,state) VALUES(?,?,?,?,?)")){character.setString(1,id);character.setString(2,accountUid);character.setInt(3,slot);character.setString(4,name);character.setString(5,"");character.executeUpdate();}return null;});return new CharacterSummary(slot,id,name,profileName);}
+    private Vector3f resetPlayerForNewCharacter(Player player,String name){player.setName(name);player.getInventory().clear();player.getInventory().syncWithClient();player.getClothes().removeAll();applyProfileAppearance(player);player.setHealth(player.getMaxHealth());player.setHunger(100);player.setThirst(100);player.setStamina(player.getMaxStamina());player.setBrokenBones(false);player.setBleeding(false);Vector3f spawn=Server.getDefaultSpawnPosition();player.setPosition(spawn);player.setRotation(Quaternion.IDENTITY);return spawn;}
+    private Properties loadAccountProfile(String uid){return database.read(connection->{try(PreparedStatement query=connection.prepareStatement("SELECT profile_state FROM accounts WHERE account_uid=?")){query.setString(1,uid);try(ResultSet result=query.executeQuery()){return result.next()?parse(result.getString(1)):new Properties();}}});}
+    private void saveAccount(String uid,String profileName,Properties profile){database.write(connection->{try(PreparedStatement statement=connection.prepareStatement("INSERT INTO accounts(account_uid,profile_name,profile_state) VALUES(?,?,?) ON CONFLICT(account_uid) DO UPDATE SET profile_name=excluded.profile_name,profile_state=excluded.profile_state")){statement.setString(1,uid);statement.setString(2,profileName);statement.setString(3,serialize(profile));statement.executeUpdate();}return null;});}
+    private static String requireCharacterName(String value){String name=value==null?"":value.trim();if(!name.matches("[A-Za-z][A-Za-z0-9 _'-]{2,23}"))throw new IllegalArgumentException("Character names must be 3-24 characters and start with a letter");return name;}
+    private static String serialize(Properties values){try{StringWriter writer=new StringWriter();values.store(writer,null);return writer.toString();}catch(IOException impossible){throw new IllegalStateException(impossible);}}
+    private static Properties parse(String value){Properties properties=new Properties();if(value==null||value.isBlank())return properties;try{properties.load(new StringReader(value));return properties;}catch(IOException impossible){throw new IllegalStateException(impossible);}}
+    private static Properties loadFile(Path file){Properties result=new Properties();if(!Files.isRegularFile(file))return result;try(var input=Files.newInputStream(file)){result.load(input);return result;}catch(IOException exception){throw new IllegalStateException("Could not read "+file,exception);}}
+    private static byte[] readBytes(Path file){try{return Files.isRegularFile(file)?Files.readAllBytes(file):null;}catch(IOException exception){throw new IllegalStateException("Could not read "+file,exception);}}
+    private static float[] parseFloats(String value,int expected){if(value==null)return null;String[] parts=value.split(",");if(parts.length!=expected)return null;try{float[] result=new float[expected];for(int index=0;index<expected;index++)result[index]=Float.parseFloat(parts[index]);return result;}catch(NumberFormatException ignored){return null;}}
+    private record CharacterData(Properties state,byte[] inventory,byte[] clothes){}
+    record CharacterSummary(int slot,String id,String name,String profileName){String economyKey(){return "character:"+id;}}
 }

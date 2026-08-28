@@ -4,6 +4,10 @@ plugins {
     id 'java'
 }
 
+repositories {
+    mavenCentral()
+}
+
 if (providers.gradleProperty('alternateBuildDir').present) {
     layout.buildDirectory = file(providers.gradleProperty('alternateBuildDir').get())
 }
@@ -72,6 +76,9 @@ dependencies {
     if (sdkJar != null) {
         compileOnly files(sdkJar)
     }
+    implementation 'org.xerial:sqlite-jdbc:3.53.1.0'
+    implementation 'org.slf4j:slf4j-api:2.0.17'
+    runtimeOnly 'org.slf4j:slf4j-nop:2.0.17'
 }
 
 java {
@@ -99,6 +106,10 @@ tasks.named('jar') {
                 'Implementation-Version': project.version,
                 'Implementation-Vendor': 'Adam Guthrie'
         )
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
     }
 }
 

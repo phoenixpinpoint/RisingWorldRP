@@ -12,8 +12,8 @@ claim-backed chest ownership services.
 - `ChestService` persists chest ownership and lock state.
 - `ChestOwnership` identifies a chest owner and whether the chest is locked.
 
-Claims are stored in `Worlds/<world>/CivicCore/claims.properties`. Other plugins
-can access the world-scoped service through `CivicCore.getClaimService()`.
+Claims, claim administrators, and chest locks are stored in the world-scoped
+database. Other plugins can access claims through `CivicCore.getClaimService()`.
 
 ## Player commands
 
@@ -42,5 +42,5 @@ Storage placed in a claim belongs to that claim's character owner and begins
 unlocked. Existing chests inherit the current claim owner when first accessed.
 The owner can use `/chest status`, `/chest lock`, and `/chest unlock` while
 looking at the storage object. Locked chests are restricted to their owner,
-unless administrator bypass is active. State is stored in `chests.properties`
-and removed when the chest is destroyed.
+unless administrator bypass is active. State is removed from the database when
+the chest is destroyed.

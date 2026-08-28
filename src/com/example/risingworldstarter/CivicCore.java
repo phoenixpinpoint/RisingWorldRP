@@ -10,9 +10,11 @@ import com.example.risingworldstarter.claims.ClaimService;
 import com.example.risingworldstarter.commands.CommandAction;
 import com.example.risingworldstarter.commands.CommandRegistry;
 import com.example.risingworldstarter.commands.RegisteredCommand;
+import com.example.risingworldstarter.database.Database;
+import com.example.risingworldstarter.database.SqliteDatabase;
+import com.example.risingworldstarter.economy.DatabaseEconomyService;
 import com.example.risingworldstarter.economy.EconomyApi;
 import com.example.risingworldstarter.economy.EconomySettings;
-import com.example.risingworldstarter.economy.FileEconomyService;
 import net.risingworld.api.Plugin;
 import net.risingworld.api.Server;
 import net.risingworld.api.Timer;
@@ -114,6 +116,7 @@ public final class CivicCore extends Plugin implements Listener {
     private final Map<String, Vector3f> lastEquippedConstructionSizes = new ConcurrentHashMap<>();
     private final Map<String, Long> autoTrimScheduledAt = new ConcurrentHashMap<>();
     private final CommandRegistry commandRegistry = new CommandRegistry();
+    private Database database;
     private EconomyApi economy;
     private ClaimService claims;
     private ClaimAdminService claimAdmins;
@@ -148,16 +151,19 @@ public final class CivicCore extends Plugin implements Listener {
             return;
         }
 
-        economy = new FileEconomyService(worldDataPath.resolve("balances.properties"));
-        debug("Economy balances loaded");
-        claims = new ClaimService(worldDataPath.resolve("claims.properties"));
-        debug("Land claims loaded");
-        claimAdmins = new ClaimAdminService(worldDataPath.resolve("claim-admins.properties"));
-        debug("Claim administrators loaded: " + claimAdmins.getAll().size());
-        chests = new ChestService(worldDataPath.resolve("chests.properties"));
-        debug("Chest ownership and locks loaded");
-        characterService = new CharacterService(worldDataPath.resolve("characters"));
-        debug("Character service loaded with four slots per account");
+        database = new SqliteDatabase(worldDataPath.resolve("civiccore.db"));
+        DatabaseEconomyService databaseEconomy = new DatabaseEconomyService(database);
+        economy = databaseEconomy;
+        claims = new ClaimService(database);
+        claimAdmins = new ClaimAdminService(database);
+        chests = new ChestService(database);
+        characterService = new CharacterService(database);
+        if (LegacyStateMigrator.migrate(database, worldDataPath, databaseEconomy,
+                claims, claimAdmins, chests, characterService)) {
+            debug("Migrated legacy mutable state into civiccore.db; original files retained as backups");
+        }
+        debug("Database state loaded: " + claims.getClaimCount() + " claims, "
+                + claimAdmins.getAll().size() + " claim administrators");
         windowTrimService = new WindowTrimService(CivicCore::debug);
         debug("Window auto-trim service loaded");
 
@@ -336,6 +342,10 @@ public final class CivicCore extends Plugin implements Listener {
         lastEquippedConstructionSizes.clear();
         autoTrimScheduledAt.clear();
         storeCatalogLoaded = false;
+        if (database != null) {
+            database.close();
+            database = null;
+        }
         System.out.println("[CivicCore] Disabled");
     }
 
