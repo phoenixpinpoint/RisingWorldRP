@@ -31,3 +31,5 @@ build-verify/
 
 # Machine-specific editor configuration
 .vscode/
+
+config/build.config.json

@@ -1,6 +1,18 @@
 package com.example.risingworldstarter;
 
 import com.example.risingworldstarter.autotrim.WindowTrimService;
+import com.example.risingworldstarter.claims.ChestOwnership;
+import com.example.risingworldstarter.claims.ChestService;
+import com.example.risingworldstarter.claims.Claim;
+import com.example.risingworldstarter.claims.ClaimAdminService;
+import com.example.risingworldstarter.claims.ClaimedChunk;
+import com.example.risingworldstarter.claims.ClaimService;
+import com.example.risingworldstarter.commands.CommandAction;
+import com.example.risingworldstarter.commands.CommandRegistry;
+import com.example.risingworldstarter.commands.RegisteredCommand;
+import com.example.risingworldstarter.economy.EconomyApi;
+import com.example.risingworldstarter.economy.EconomySettings;
+import com.example.risingworldstarter.economy.FileEconomyService;
 import net.risingworld.api.Plugin;
 import net.risingworld.api.Server;
 import net.risingworld.api.Timer;
@@ -52,6 +64,7 @@ import java.text.NumberFormat;
 import java.util.Locale;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
@@ -59,7 +72,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Minimal entry point for a Rising World (Unity version) plugin.
  */
-public final class RisingWorldStarter extends Plugin implements Listener {
+public final class CivicCore extends Plugin implements Listener {
     private static final int[] SKIN_COLORS = {
             0xF1C27D, 0xE0AC69, 0xC68642, 0xA66A3F, 0x8D5524, 0x5C3317
     };
@@ -86,6 +99,8 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private final Map<String, Float> visualHeights = new ConcurrentHashMap<>();
     private final Map<String, StoreView> storeViews = new ConcurrentHashMap<>();
     private final Map<String, AdminView> adminViews = new ConcurrentHashMap<>();
+    private final Map<String, AboutView> aboutViews = new ConcurrentHashMap<>();
+    private final Map<String, CommandListView> commandListViews = new ConcurrentHashMap<>();
     private final Map<String, CharacterService.CharacterSummary> activeCharacters = new ConcurrentHashMap<>();
     private final Map<String, String> activeClaimIdentities = new ConcurrentHashMap<>();
     private final Map<String, CharacterSelectionView> characterSelectionViews = new ConcurrentHashMap<>();
@@ -98,6 +113,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private final Map<String, Integer> lastEquippedConstructionIds = new ConcurrentHashMap<>();
     private final Map<String, Vector3f> lastEquippedConstructionSizes = new ConcurrentHashMap<>();
     private final Map<String, Long> autoTrimScheduledAt = new ConcurrentHashMap<>();
+    private final CommandRegistry commandRegistry = new CommandRegistry();
     private EconomyApi economy;
     private ClaimService claims;
     private ClaimAdminService claimAdmins;
@@ -123,11 +139,11 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         // Keep persistent data directly in the game's world save. Steam Cloud
         // synchronizes world content, but plugin-installation folders are not
         // part of the portable save on every platform.
-        Path worldDataPath = worldFolder.resolve("RisingWorldStarter");
+        Path worldDataPath = worldFolder.resolve("CivicCore");
         debug("World-scoped data directory: " + worldDataPath);
         prepareWorldDataDirectory(pluginPath, worldDataPath);
         if (!isEnabledForWorld(worldDataPath.resolve("plugin.properties"))) {
-            System.out.println("[RisingWorldStarter] Not enabled for world " + World.getName()
+            System.out.println("[CivicCore] Not enabled for world " + World.getName()
                     + ": create " + worldDataPath.resolve("plugin.properties") + " to opt in");
             return;
         }
@@ -142,7 +158,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         debug("Chest ownership and locks loaded");
         characterService = new CharacterService(worldDataPath.resolve("characters"));
         debug("Character service loaded with four slots per account");
-        windowTrimService = new WindowTrimService(RisingWorldStarter::debug);
+        windowTrimService = new WindowTrimService(CivicCore::debug);
         debug("Window auto-trim service loaded");
 
         Path economyConfigPath = worldDataPath.resolve("economy.properties");
@@ -166,6 +182,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         debug(String.format(Locale.US, "World clock initialized: %d-%d-%d %02d:%02d",
                 currentTime.getYear(), currentTime.getMonth(), currentTime.getDay(),
                 currentTime.getHours(), currentTime.getMinutes()));
+        registerCommands();
         registerEventListener(this);
         debug("Event listener registered");
         executeDelayed(0.5f, () -> {
@@ -181,21 +198,29 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         characterAutosaveTimer = new Timer(60f, 60f, -1, this::saveActiveCharacters);
         characterAutosaveTimer.start();
         debug("World clock and payroll timer started; payroll runs at 00:00, 08:00, and 16:00");
-        debug("Commands registered: /characters, /syncappearance, /balance, /bal, /store, /admin, /claim, /unclaim, /chunk, /claims, /claimadmin, /chest");
-        System.out.println("[RisingWorldStarter] Enabled on Rising World " + getGameVersion());
+        debug("Commands registered: " + commandRegistry.getCommands().stream()
+                .map(RegisteredCommand::name).toList());
+        System.out.println("[CivicCore] Enabled on Rising World " + getGameVersion());
     }
 
     private void prepareWorldDataDirectory(Path pluginPath, Path worldDataPath) {
         Path worldFolder = World.getWorldFolder().toPath().toAbsolutePath().normalize();
-        Path previousWorldDataPath = worldFolder.resolve("plugins").resolve("RisingWorldStarter");
+        Path previousWorldDataPath = worldFolder.resolve("RisingWorldStarter");
+        Path olderWorldDataPath = worldFolder.resolve("plugins").resolve("RisingWorldStarter");
 
         try {
             Files.createDirectories(worldDataPath);
             copyLegacyFile(previousWorldDataPath.resolve("plugin.properties"),
                     worldDataPath.resolve("plugin.properties"));
+            copyLegacyFile(olderWorldDataPath.resolve("plugin.properties"),
+                    worldDataPath.resolve("plugin.properties"));
             copyLegacyFile(previousWorldDataPath.resolve("economy.properties"),
                     worldDataPath.resolve("economy.properties"));
+            copyLegacyFile(olderWorldDataPath.resolve("economy.properties"),
+                    worldDataPath.resolve("economy.properties"));
             copyLegacyFile(previousWorldDataPath.resolve("marketplace.json"),
+                    worldDataPath.resolve("marketplace.json"));
+            copyLegacyFile(olderWorldDataPath.resolve("marketplace.json"),
                     worldDataPath.resolve("marketplace.json"));
             copyLegacyFile(pluginPath.resolve("economy.properties"),
                     worldDataPath.resolve("economy.properties"));
@@ -208,15 +233,21 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                         || Files.exists(previousWorldDataPath.resolve("claim-admins.properties"))
                         || Files.exists(previousWorldDataPath.resolve("chests.properties"))
                         || Files.isDirectory(previousWorldDataPath.resolve("characters"));
+                boolean hasOlderWorldData = Files.exists(olderWorldDataPath.resolve("balances.properties"))
+                        || Files.exists(olderWorldDataPath.resolve("claims.properties"))
+                        || Files.exists(olderWorldDataPath.resolve("claim-admins.properties"))
+                        || Files.exists(olderWorldDataPath.resolve("chests.properties"))
+                        || Files.isDirectory(olderWorldDataPath.resolve("characters"));
                 boolean hasFilesInWorldRoot = Files.exists(worldFolder.resolve("balances.properties"))
                         || Files.exists(worldFolder.resolve("claims.properties"))
                         || Files.exists(worldFolder.resolve("claim-admins.properties"))
                         || Files.exists(worldFolder.resolve("chests.properties"))
                         || Files.isDirectory(worldFolder.resolve("characters"));
                 Path legacySource = hasPreviousWorldData ? previousWorldDataPath
+                        : hasOlderWorldData ? olderWorldDataPath
                         : hasFilesInWorldRoot ? worldFolder : pluginPath;
                 Path globalMigrationMarker = pluginPath.resolve("legacy-data-world.txt");
-                boolean mayImportGlobalData = hasPreviousWorldData || hasFilesInWorldRoot
+                boolean mayImportGlobalData = hasPreviousWorldData || hasOlderWorldData || hasFilesInWorldRoot
                         || !Files.exists(globalMigrationMarker);
                 if (mayImportGlobalData) {
                     copyLegacyFile(legacySource.resolve("balances.properties"),
@@ -290,6 +321,8 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         visualHeights.clear();
         storeViews.clear();
         adminViews.clear();
+        aboutViews.clear();
+        commandListViews.clear();
         activeCharacters.clear();
         activeClaimIdentities.clear();
         characterSelectionViews.clear();
@@ -303,7 +336,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         lastEquippedConstructionSizes.clear();
         autoTrimScheduledAt.clear();
         storeCatalogLoaded = false;
-        System.out.println("[RisingWorldStarter] Disabled");
+        System.out.println("[CivicCore] Disabled");
     }
 
     /** Returns this plugin's economy API for use by other plugins. */
@@ -312,6 +345,19 @@ public final class RisingWorldStarter extends Plugin implements Listener {
             throw new IllegalStateException("Economy is not available before the plugin is enabled");
         }
         return economy;
+    }
+
+    /** Returns the world-scoped land-claim service for integrations with other plugins. */
+    public ClaimService getClaimService() {
+        if (claims == null) {
+            throw new IllegalStateException("Claims are not available before the plugin is enabled");
+        }
+        return claims;
+    }
+
+    /** Returns the shared registry so other plugins can register commands and actions. */
+    public CommandRegistry getCommandRegistry() {
+        return commandRegistry;
     }
 
     /** Returns the economy/claim identity for the player's selected character. */
@@ -373,6 +419,8 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         visualHeights.remove(event.getPlayer().getUID());
         storeViews.remove(event.getPlayer().getUID());
         adminViews.remove(event.getPlayer().getUID());
+        aboutViews.remove(event.getPlayer().getUID());
+        commandListViews.remove(event.getPlayer().getUID());
         characterSelectionViews.remove(event.getPlayer().getUID());
         appearanceViews.remove(event.getPlayer().getUID());
         claimProtectionNotices.remove(event.getPlayer().getUID());
@@ -698,49 +746,259 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     @EventMethod
     public void onPlayerCommand(PlayerCommandEvent event) {
         String[] parts = event.getCommand().trim().split("\\s+", 3);
-        String command = parts[0];
-        if (!activeCharacters.containsKey(event.getPlayer().getUID())) {
-            event.setCancelled(true);
+        RegisteredCommand command = commandRegistry.find(parts[0]);
+        if (command == null) {
+            return;
+        }
+        event.setCancelled(true);
+        if (command.requiresCharacter() && !activeCharacters.containsKey(event.getPlayer().getUID())) {
             event.getPlayer().sendTextMessage("<color=#FFAA66>Select or create a character first.</color>");
             return;
         }
-        if (command.equalsIgnoreCase("/characters") || command.equalsIgnoreCase("/character")
-                || command.equalsIgnoreCase("/chars")) {
-            event.setCancelled(true);
-            openCharacterSwitcher(event.getPlayer());
-        } else if (command.equalsIgnoreCase("/syncappearance")) {
-            event.setCancelled(true);
-            syncProfileAppearance(event.getPlayer());
-        } else if (command.equalsIgnoreCase("/balance") || command.equalsIgnoreCase("/bal")) {
-            event.setCancelled(true);
-            Player player = event.getPlayer();
-            String formattedBalance = formatBalance(economy.getBalance(characterKey(player)));
-            player.sendTextMessage("<color=#E8C547>Cash:</color> " + formattedBalance);
-            updateBalanceLabel(player);
-        } else if (command.equalsIgnoreCase("/store")) {
-            event.setCancelled(true);
-            toggleStore(event.getPlayer());
-        } else if (command.equalsIgnoreCase("/admin")) {
-            event.setCancelled(true);
-            toggleAdminDashboard(event.getPlayer());
-        } else if (command.equalsIgnoreCase("/claim")) {
-            event.setCancelled(true);
-            claimCurrentChunk(event.getPlayer());
-        } else if (command.equalsIgnoreCase("/unclaim")) {
-            event.setCancelled(true);
-            unclaimCurrentChunk(event.getPlayer());
-        } else if (command.equalsIgnoreCase("/chunk")) {
-            event.setCancelled(true);
-            showCurrentChunk(event.getPlayer(), true);
-        } else if (command.equalsIgnoreCase("/claims")) {
-            event.setCancelled(true);
-            listOwnedChunks(event.getPlayer());
-        } else if (command.equalsIgnoreCase("/claimadmin")) {
-            event.setCancelled(true);
-            handleClaimAdminCommand(event.getPlayer(), parts);
-        } else if (command.equalsIgnoreCase("/chest")) {
-            event.setCancelled(true);
-            handleChestCommand(event.getPlayer(), parts);
+        command.action().execute(event.getPlayer(), parts);
+    }
+
+    private void registerCommands() {
+        commandRegistry.unregisterOwner("CivicCore");
+        registerCommand("General", "/help", "Show available CivicCore commands in chat.", false, List.of(),
+                (player, parts) -> showHelp(player));
+        registerCommand("General", "/commands", "Open the categorized command list.", false, List.of(),
+                (player, parts) -> showCommands(player));
+        registerCommand("General", "/about", "Show CivicCore information and version.", false, List.of(),
+                (player, parts) -> showAbout(player));
+        registerCommand("Character", "/characters", "Open the character selector.", true,
+                List.of("/character", "/chars"), (player, parts) -> openCharacterSwitcher(player));
+        registerCommand("Character", "/syncappearance", "Copy your current profile appearance.", true, List.of(),
+                (player, parts) -> syncProfileAppearance(player));
+        registerCommand("Economy", "/balance", "Show your current cash balance.", true, List.of("/bal"),
+                (player, parts) -> {
+                    String formattedBalance = formatBalance(economy.getBalance(characterKey(player)));
+                    player.sendTextMessage("<color=#E8C547>Cash:</color> " + formattedBalance);
+                    updateBalanceLabel(player);
+                });
+        registerCommand("Marketplace", "/store", "Open or close the marketplace.", true, List.of(),
+                (player, parts) -> toggleStore(player));
+        registerCommand("Administration", "/admin", "Open the administrator dashboard.", true, List.of(),
+                (player, parts) -> toggleAdminDashboard(player));
+        registerCommand("Land Claims", "/claim", "Claim your current chunk.", true, List.of(),
+                (player, parts) -> claimCurrentChunk(player));
+        registerCommand("Land Claims", "/unclaim", "Release your current chunk.", true, List.of(),
+                (player, parts) -> unclaimCurrentChunk(player));
+        registerCommand("Land Claims", "/chunk", "Show the current chunk and its owner.", true, List.of(),
+                (player, parts) -> showCurrentChunk(player, true));
+        registerCommand("Land Claims", "/claims", "List and toggle your claimed chunks.", true, List.of(),
+                (player, parts) -> listOwnedChunks(player));
+        registerCommand("Land Claims", "/claimadmin <add|remove|list> [player]", "Manage claim administrators.", true,
+                List.of(), this::handleClaimAdminCommand);
+        registerCommand("Storage", "/chest <lock|unlock|status>", "Manage the chest you are looking at.", true,
+                List.of(), this::handleChestCommand);
+    }
+
+    private void registerCommand(String category, String usage, String description, boolean requiresCharacter,
+                                 List<String> aliases, CommandAction action) {
+        String primaryName = usage.split("\\s+", 2)[0];
+        commandRegistry.register("CivicCore", primaryName, category, usage, description,
+                requiresCharacter, aliases, action);
+    }
+
+    private void showHelp(Player player) {
+        player.sendTextMessage("<color=#E8C547>--- CivicCore Commands ---</color>");
+        for (RegisteredCommand command : commandRegistry.getCommands()) {
+            String aliases = command.aliases().isEmpty()
+                    ? ""
+                    : " <color=#888888>(aliases: " + String.join(", ", command.aliases()) + ")</color>";
+            player.sendTextMessage("<color=#77AAFF>" + command.usage() + "</color>" + aliases
+                    + " - " + command.description());
+        }
+    }
+
+    private void showCommands(Player player) {
+        CommandListView previous = commandListViews.remove(player.getUID());
+        if (previous != null) player.removeUIElement(previous.window());
+
+        UIElement window = new UIElement();
+        window.setPosition(50f, 50f, true);
+        window.setPivot(Pivot.MiddleCenter);
+        window.setSize(800f, 620f, false);
+        window.setBackgroundColor((int) 0x161B22F8L);
+        window.setBorder(2f);
+        window.setBorderColor((int) 0xE8C547FFL);
+        window.setBorderEdgeRadius(8f, false);
+
+        UILabel title = new UILabel("CivicCore Commands");
+        title.setPosition(24f, 14f, false);
+        title.setSize(680f, 42f, false);
+        title.setFontSize(28f);
+        title.setFontColor((int) 0xF4E3A1FFL);
+        title.setTextAlign(TextAnchor.MiddleLeft);
+        window.addChild(title);
+
+        UILabel closeButton = new UILabel("X");
+        closeButton.setPosition(744f, 14f, false);
+        closeButton.setSize(36f, 36f, false);
+        closeButton.setFontSize(22f);
+        closeButton.setTextAlign(TextAnchor.MiddleCenter);
+        closeButton.setBackgroundColor((int) 0x8B2D2DFFL);
+        closeButton.setClickable(true);
+        window.addChild(closeButton);
+
+        UIScrollView commandList = new UIScrollView(UIScrollView.ScrollViewMode.Vertical);
+        commandList.setPosition(20f, 66f, false);
+        commandList.setSize(760f, 530f, false);
+        commandList.setVerticalScrollerVisibility(UIScrollView.ScrollerVisibility.Auto);
+        commandList.setHorizontalScrollerVisibility(UIScrollView.ScrollerVisibility.Hidden);
+        commandList.setMouseWheelScrollSize(48f);
+        window.addChild(commandList);
+
+        Map<String, List<RegisteredCommand>> commandsByCategory = new LinkedHashMap<>();
+        for (RegisteredCommand command : commandRegistry.getCommands()) {
+            commandsByCategory.computeIfAbsent(command.category(), ignored -> new ArrayList<>()).add(command);
+        }
+
+        float y = 0f;
+        for (Map.Entry<String, List<RegisteredCommand>> category : commandsByCategory.entrySet()) {
+            UILabel categoryLabel = new UILabel(category.getKey());
+            categoryLabel.setPosition(8f, y, false);
+            categoryLabel.setSize(720f, 34f, false);
+            categoryLabel.setFontSize(20f);
+            categoryLabel.setFontColor((int) 0xE8C547FFL);
+            categoryLabel.setTextAlign(TextAnchor.MiddleLeft);
+            categoryLabel.setBackgroundColor((int) 0x28313CFFL);
+            commandList.addChild(categoryLabel);
+            y += 38f;
+
+            for (RegisteredCommand command : category.getValue()) {
+                String commandText = command.usage();
+                if (!command.aliases().isEmpty()) {
+                    commandText += "  (" + String.join(", ", command.aliases()) + ")";
+                }
+                UILabel usage = new UILabel(commandText);
+                usage.setPosition(18f, y, false);
+                usage.setSize(350f, 38f, false);
+                usage.setFontSize(15f);
+                usage.setFontColor((int) 0x77AAFFFFL);
+                usage.setTextAlign(TextAnchor.MiddleLeft);
+                commandList.addChild(usage);
+
+                UILabel description = new UILabel(command.description());
+                description.setPosition(376f, y, false);
+                description.setSize(350f, 38f, false);
+                description.setFontSize(15f);
+                description.setFontColor((int) 0xDDDDDDFFL);
+                description.setTextAlign(TextAnchor.MiddleLeft);
+                commandList.addChild(description);
+                y += 42f;
+            }
+            y += 8f;
+        }
+
+        commandListViews.put(player.getUID(), new CommandListView(window, closeButton));
+        player.addUIElement(window);
+        player.stopInput(true, true);
+        player.setMouseCursorVisible(true);
+    }
+
+    private void closeCommands(Player player) {
+        CommandListView view = commandListViews.remove(player.getUID());
+        if (view != null) player.removeUIElement(view.window());
+        boolean anotherDialogOpen = aboutViews.containsKey(player.getUID())
+                || characterSelectionViews.containsKey(player.getUID())
+                || appearanceViews.containsKey(player.getUID())
+                || adminViews.containsKey(player.getUID())
+                || storeViews.containsKey(player.getUID());
+        if (!anotherDialogOpen) {
+            player.stopInput(false, false);
+            player.setMouseCursorVisible(false);
+        }
+    }
+
+    private void showAbout(Player player) {
+        AboutView previous = aboutViews.remove(player.getUID());
+        if (previous != null) player.removeUIElement(previous.window());
+
+        String version = getClass().getPackage().getImplementationVersion();
+        if (version == null || version.isBlank()) version = "0.7.2";
+
+        UIElement window = new UIElement();
+        window.setPosition(50f, 50f, true);
+        window.setPivot(Pivot.MiddleCenter);
+        window.setSize(680f, 340f, false);
+        window.setBackgroundColor((int) 0x161B22F8L);
+        window.setBorder(2f);
+        window.setBorderColor((int) 0xE8C547FFL);
+        window.setBorderEdgeRadius(8f, false);
+
+        UILabel title = new UILabel("CivicCore");
+        title.setPosition(28f, 22f, false);
+        title.setSize(550f, 42f, false);
+        title.setFontSize(29f);
+        title.setFontColor((int) 0xF4E3A1FFL);
+        title.setTextAlign(TextAnchor.MiddleLeft);
+        window.addChild(title);
+
+        UILabel closeButton = new UILabel("X");
+        closeButton.setPosition(630f, 18f, false);
+        closeButton.setSize(30f, 30f, false);
+        closeButton.setFontSize(18f);
+        closeButton.setFontColor((int) 0xFFFFFFFFL);
+        closeButton.setTextAlign(TextAnchor.MiddleCenter);
+        closeButton.setBackgroundColor((int) 0x8B2E35FFL);
+        closeButton.setBorderEdgeRadius(4f, false);
+        closeButton.setClickable(true);
+        window.addChild(closeButton);
+
+        UILabel versionLabel = new UILabel("Version " + version);
+        versionLabel.setPosition(30f, 70f, false);
+        versionLabel.setSize(620f, 30f, false);
+        versionLabel.setFontSize(18f);
+        versionLabel.setFontColor((int) 0xFFFFFFFFL);
+        versionLabel.setTextAlign(TextAnchor.MiddleLeft);
+        window.addChild(versionLabel);
+
+        UILabel description = new UILabel("A roleplay foundation for persistent\n"
+                + "characters, economy, marketplace,\n"
+                + "land claims, and world administration.");
+        description.setPosition(30f, 112f, false);
+        description.setSize(620f, 78f, false);
+        description.setFontSize(18f);
+        description.setFontColor((int) 0xCCCCCCFFL);
+        description.setTextAlign(TextAnchor.MiddleLeft);
+        window.addChild(description);
+
+        UILabel features = new UILabel("Persistent characters  •  Economy\n"
+                + "Marketplace  •  Land claims  •  Administration tools");
+        features.setPosition(30f, 198f, false);
+        features.setSize(620f, 58f, false);
+        features.setFontSize(16f);
+        features.setFontColor((int) 0x77AAFFFFL);
+        features.setTextAlign(TextAnchor.MiddleLeft);
+        window.addChild(features);
+
+        UILabel credits = new UILabel("Created by Adam Guthrie   |   MIT License");
+        credits.setPosition(30f, 278f, false);
+        credits.setSize(620f, 30f, false);
+        credits.setFontSize(16f);
+        credits.setFontColor((int) 0xAAAAAAFFL);
+        credits.setTextAlign(TextAnchor.MiddleCenter);
+        window.addChild(credits);
+
+        aboutViews.put(player.getUID(), new AboutView(window, closeButton));
+        player.addUIElement(window);
+        player.stopInput(true, true);
+        player.setMouseCursorVisible(true);
+    }
+
+    private void closeAbout(Player player) {
+        AboutView view = aboutViews.remove(player.getUID());
+        if (view != null) player.removeUIElement(view.window());
+        boolean anotherDialogOpen = characterSelectionViews.containsKey(player.getUID())
+                || appearanceViews.containsKey(player.getUID())
+                || adminViews.containsKey(player.getUID())
+                || storeViews.containsKey(player.getUID())
+                || commandListViews.containsKey(player.getUID());
+        if (!anotherDialogOpen) {
+            player.stopInput(false, false);
+            player.setMouseCursorVisible(false);
         }
     }
 
@@ -1593,7 +1851,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         }
         String targetName = target.getName();
         target.kick("Kicked by administrator " + administrator.getName());
-        System.out.println("[RisingWorldStarter] " + administrator.getName() + " kicked " + targetName
+        System.out.println("[CivicCore] " + administrator.getName() + " kicked " + targetName
                 + " (" + targetUid + ") from the admin dashboard");
         executeDelayed(0.5f, () -> {
             AdminView view = adminViews.get(administrator.getUID());
@@ -1621,7 +1879,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                         return;
                     }
                     Server.banPlayer(targetUid, "Banned by administrator " + administrator.getName(), -1);
-                    System.out.println("[RisingWorldStarter] " + administrator.getName() + " banned "
+                    System.out.println("[CivicCore] " + administrator.getName() + " banned "
                             + targetName + " (" + targetUid + ") from the admin dashboard");
                     executeDelayed(0.5f, () -> {
                         AdminView view = adminViews.get(administrator.getUID());
@@ -2036,7 +2294,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         lastSalaryPeriod = currentPeriod;
         long salary = economySettings.baseSalary();
         Player[] players = Server.getAllPlayers();
-        System.out.println("[RisingWorldStarter] Running 8-hour payroll for " + players.length
+        System.out.println("[CivicCore] Running 8-hour payroll for " + players.length
                 + " connected player(s) at " + currentPeriod.periodStartHour() + ":00 on "
                 + currentPeriod.year() + "-" + currentPeriod.month() + "-" + currentPeriod.day());
         for (Player player : players) {
@@ -2046,7 +2304,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
             long newBalance = economy.deposit(characterKey, salary);
             updateBalanceLabel(player);
             player.sendTextMessage("<color=#77FF99>8-hour salary paid:</color> " + formatBalance(salary));
-            System.out.println("[RisingWorldStarter] Paid " + player.getName() + " " + formatBalance(salary)
+            System.out.println("[CivicCore] Paid " + player.getName() + " " + formatBalance(salary)
                     + "; new balance " + formatBalance(newBalance));
         }
     }
@@ -2077,12 +2335,26 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     }
 
     private static void debug(String message) {
-        System.out.println("[RisingWorldStarter/DEBUG] " + message);
+        System.out.println("[CivicCore/DEBUG] " + message);
     }
 
     @EventMethod
     public void onStoreClick(PlayerUIElementClickEvent event) {
         Player player = event.getPlayer();
+        CommandListView commandListView = commandListViews.get(player.getUID());
+        if (commandListView != null) {
+            if (event.getUIElement().getID() == commandListView.closeButton().getID()) {
+                closeCommands(player);
+            }
+            return;
+        }
+        AboutView aboutView = aboutViews.get(player.getUID());
+        if (aboutView != null) {
+            if (event.getUIElement().getID() == aboutView.closeButton().getID()) {
+                closeAbout(player);
+            }
+            return;
+        }
         AppearanceView appearanceView = appearanceViews.get(player.getUID());
         if (appearanceView != null) {
             handleAppearanceClick(player, appearanceView, event.getUIElement().getID());
@@ -2267,6 +2539,12 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                              UILabel summary, UILabel adminOverrideButton, UIScrollView playerList,
                              Map<Integer, String> kickTargetsByButtonId,
                              Map<Integer, String> banTargetsByButtonId) {
+    }
+
+    private record AboutView(UIElement window, UILabel closeButton) {
+    }
+
+    private record CommandListView(UIElement window, UILabel closeButton) {
     }
 
     private record CharacterSelectionView(UIElement window,

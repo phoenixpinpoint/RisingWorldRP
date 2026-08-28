@@ -1,5 +1,5 @@
-name: RisingWorldStarter
-main: com.example.risingworldstarter.RisingWorldStarter
+name: CivicCore
+main: com.example.risingworldstarter.CivicCore
 version: 0.7.2
 author: Adam Guthrie
 description: "Persistent economy and chunk-based land claims with in-world visualization"

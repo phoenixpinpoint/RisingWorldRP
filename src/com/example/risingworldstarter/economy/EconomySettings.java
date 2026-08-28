@@ -1,4 +1,4 @@
-package com.example.risingworldstarter;
+package com.example.risingworldstarter.economy;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -9,12 +9,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
 
-record EconomySettings(long defaultBalance, long claimCost, long baseSalary) {
+public record EconomySettings(long defaultBalance, long claimCost, long baseSalary) {
     private static final String DEFAULT_BALANCE = "25000.00";
     private static final String CLAIM_COST = "10000.00";
     private static final String BASE_SALARY = "1000.00";
 
-    static EconomySettings load(Path path) {
+    public static EconomySettings load(Path path) {
         Properties properties = new Properties();
         if (Files.exists(path)) {
             try (InputStream input = Files.newInputStream(path)) {

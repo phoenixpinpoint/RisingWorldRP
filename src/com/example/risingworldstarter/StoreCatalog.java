@@ -40,7 +40,7 @@ final class StoreCatalog {
             if (Files.exists(legacyPath)) {
                 try (InputStream input = Files.newInputStream(legacyPath)) {
                     properties.load(input);
-                    System.out.println("[RisingWorldStarter/DEBUG] Migrating legacy marketplace config from "
+                    System.out.println("[CivicCore/DEBUG] Migrating legacy marketplace config from "
                             + legacyPath + " to " + path);
                 } catch (IOException exception) {
                     throw new IllegalStateException("Could not load legacy marketplace settings from "
@@ -69,7 +69,7 @@ final class StoreCatalog {
                 enabledItems.add(new StoreItem((short) configuredId, itemName, category, price));
             }
         }
-        System.out.println("[RisingWorldStarter/DEBUG] Marketplace blocked " + blockedDefinitions
+        System.out.println("[CivicCore/DEBUG] Marketplace blocked " + blockedDefinitions
                 + " internal or NPC configured item(s)");
 
         enabledItems.sort(Comparator.comparing(StoreItem::category, String.CASE_INSENSITIVE_ORDER)

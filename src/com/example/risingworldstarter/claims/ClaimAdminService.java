@@ -1,4 +1,4 @@
-package com.example.risingworldstarter;
+package com.example.risingworldstarter.claims;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -13,25 +13,25 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 
-final class ClaimAdminService {
+public final class ClaimAdminService {
     private final Path dataFile;
     private final Map<String, String> admins = new LinkedHashMap<>();
 
-    ClaimAdminService(Path dataFile) {
+    public ClaimAdminService(Path dataFile) {
         this.dataFile = Objects.requireNonNull(dataFile, "dataFile");
         load();
     }
 
-    synchronized boolean contains(String playerUid) {
+    public synchronized boolean contains(String playerUid) {
         return admins.containsKey(playerUid);
     }
 
-    synchronized void add(String playerUid, String playerName) {
+    public synchronized void add(String playerUid, String playerName) {
         admins.put(playerUid, playerName);
         save();
     }
 
-    synchronized boolean remove(String playerUid) {
+    public synchronized boolean remove(String playerUid) {
         if (admins.remove(playerUid) == null) {
             return false;
         }
@@ -39,7 +39,7 @@ final class ClaimAdminService {
         return true;
     }
 
-    synchronized Map<String, String> getAll() {
+    public synchronized Map<String, String> getAll() {
         return Map.copyOf(admins);
     }
 

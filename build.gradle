@@ -9,7 +9,7 @@ if (providers.gradleProperty('alternateBuildDir').present) {
 }
 
 group = 'com.example'
-version = '1.0.0'
+version = '0.8.1'
 
 def configuredRisingWorldPath = providers.gradleProperty('risingWorldPath')
         .orElse(providers.environmentVariable('RISING_WORLD_PATH'))
@@ -90,15 +90,21 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 tasks.named('jar') {
-    archiveBaseName = 'RisingWorldStarter'
+    archiveBaseName = 'CivicCore'
     archiveVersion = ''
     destinationDirectory = layout.buildDirectory
+    manifest {
+        attributes(
+                'Implementation-Title': 'CivicCore',
+                'Implementation-Version': project.version,
+                'Implementation-Vendor': 'Adam Guthrie'
+        )
+    }
 }
 
 tasks.register('installPlugin', Copy) {
     group = 'Rising World'
     description = 'Builds and installs the plugin into the configured Rising World installation.'
-    dependsOn tasks.named('jar')
     from tasks.named('jar').flatMap { it.archiveFile }
     into { requireRisingWorldDirectory(risingWorldDirectory) }
 }
@@ -123,8 +129,12 @@ tasks.register('printRisingWorldSdk') {
 }
 
 File requireRisingWorldDirectory(File directory) {
+    return requireRisingWorldDirectory(directory, 'CivicCore')
+}
+
+File requireRisingWorldDirectory(File directory, String pluginName) {
     if (directory == null) {
         throw new GradleException('Rising World installation not found; configure risingWorldPath for this computer.')
     }
-    return new File(directory, 'Plugins/RisingWorldStarter')
+    return new File(directory, "Plugins/${pluginName}")
 }
