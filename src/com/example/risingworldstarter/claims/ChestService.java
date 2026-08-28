@@ -1,97 +1,38 @@
 package com.example.risingworldstarter.claims;
 
-import java.io.IOException;
+import com.example.risingworldstarter.database.Database;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
+import java.sql.PreparedStatement;
 import java.util.Base64;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 
 public final class ChestService {
-    private final Path dataFile;
-    private final Map<String, ChestOwnership> chests = new HashMap<>();
+    private final Database database;
+    public ChestService(Database database) { this.database=database; }
 
-    public ChestService(Path dataFile) {
-        this.dataFile = dataFile;
-        load();
+    public Optional<ChestOwnership> get(long globalId,int chunkX,int chunkY,int chunkZ) {
+        return database.read(connection->{try(PreparedStatement query=connection.prepareStatement("SELECT owner_id,owner_name,locked FROM chests WHERE global_id=? AND chunk_x=? AND chunk_y=? AND chunk_z=?")){bindKey(query,globalId,chunkX,chunkY,chunkZ);try(var result=query.executeQuery()){return result.next()?Optional.of(new ChestOwnership(result.getString(1),result.getString(2),result.getBoolean(3))):Optional.empty();}}});
     }
 
-    public synchronized Optional<ChestOwnership> get(long globalId, int chunkX, int chunkY, int chunkZ) {
-        return Optional.ofNullable(chests.get(key(globalId, chunkX, chunkY, chunkZ)));
+    public ChestOwnership assign(long globalId,int chunkX,int chunkY,int chunkZ,String ownerUid,String ownerName) {
+        return database.transaction(connection->{try(PreparedStatement insert=connection.prepareStatement("INSERT INTO chests(global_id,chunk_x,chunk_y,chunk_z,owner_id,owner_name,locked) VALUES(?,?,?,?,?,?,0) ON CONFLICT(global_id,chunk_x,chunk_y,chunk_z) DO NOTHING")){bindKey(insert,globalId,chunkX,chunkY,chunkZ);insert.setString(5,ownerUid);insert.setString(6,ownerName);insert.executeUpdate();}try(PreparedStatement query=connection.prepareStatement("SELECT owner_id,owner_name,locked FROM chests WHERE global_id=? AND chunk_x=? AND chunk_y=? AND chunk_z=?")){bindKey(query,globalId,chunkX,chunkY,chunkZ);try(var result=query.executeQuery()){if(!result.next())throw new IllegalStateException("Could not assign chest");return new ChestOwnership(result.getString(1),result.getString(2),result.getBoolean(3));}}});
     }
 
-    public synchronized ChestOwnership assign(long globalId, int chunkX, int chunkY, int chunkZ,
-                                       String ownerUid, String ownerName) {
-        String key = key(globalId, chunkX, chunkY, chunkZ);
-        ChestOwnership existing = chests.get(key);
-        if (existing != null) return existing;
-        ChestOwnership created = new ChestOwnership(ownerUid, ownerName, false);
-        chests.put(key, created);
-        save();
-        return created;
+    public ChestOwnership setLocked(long globalId,int chunkX,int chunkY,int chunkZ,ChestOwnership ownership,boolean locked) {
+        database.write(connection->{try(PreparedStatement update=connection.prepareStatement("UPDATE chests SET locked=? WHERE global_id=? AND chunk_x=? AND chunk_y=? AND chunk_z=?")){update.setBoolean(1,locked);update.setLong(2,globalId);update.setInt(3,chunkX);update.setInt(4,chunkY);update.setInt(5,chunkZ);update.executeUpdate();}return null;});
+        return new ChestOwnership(ownership.ownerUid(),ownership.ownerName(),locked);
     }
 
-    public synchronized ChestOwnership setLocked(long globalId, int chunkX, int chunkY, int chunkZ,
-                                          ChestOwnership ownership, boolean locked) {
-        ChestOwnership updated = new ChestOwnership(ownership.ownerUid(), ownership.ownerName(), locked);
-        chests.put(key(globalId, chunkX, chunkY, chunkZ), updated);
-        save();
-        return updated;
+    public void remove(long globalId,int chunkX,int chunkY,int chunkZ) { database.write(connection->{try(PreparedStatement delete=connection.prepareStatement("DELETE FROM chests WHERE global_id=? AND chunk_x=? AND chunk_y=? AND chunk_z=?")){bindKey(delete,globalId,chunkX,chunkY,chunkZ);delete.executeUpdate();}return null;}); }
+
+    public void migrateLegacy(Path file) {
+        if(!Files.isRegularFile(file))return;Properties values=new Properties();try(InputStream input=Files.newInputStream(file)){values.load(input);}catch(Exception exception){throw new IllegalStateException("Could not migrate chests",exception);}
+        values.forEach((rawKey,rawValue)->{try{String[] key=rawKey.toString().split(",",4);String[] value=rawValue.toString().split(":",3);if(key.length!=4||value.length!=3)return;int x=Integer.parseInt(key[0]),y=Integer.parseInt(key[1]),z=Integer.parseInt(key[2]);long id=Long.parseLong(key[3]);String owner=new String(Base64.getUrlDecoder().decode(value[0]),StandardCharsets.UTF_8);String name=new String(Base64.getUrlDecoder().decode(value[1]),StandardCharsets.UTF_8);ChestOwnership created=assign(id,x,y,z,owner,name);if(Boolean.parseBoolean(value[2])&&!created.locked())setLocked(id,x,y,z,created,true);}catch(IllegalArgumentException ignored){}});
     }
 
-    public synchronized void remove(long globalId, int chunkX, int chunkY, int chunkZ) {
-        if (chests.remove(key(globalId, chunkX, chunkY, chunkZ)) != null) save();
-    }
-
-    private void load() {
-        if (!Files.exists(dataFile)) return;
-        Properties properties = new Properties();
-        try (InputStream input = Files.newInputStream(dataFile)) {
-            properties.load(input);
-            for (String key : properties.stringPropertyNames()) {
-                String[] values = properties.getProperty(key).split(":", 3);
-                if (values.length != 3) continue;
-                String ownerUid = new String(Base64.getUrlDecoder().decode(values[0]), StandardCharsets.UTF_8);
-                String name = new String(Base64.getUrlDecoder().decode(values[1]), StandardCharsets.UTF_8);
-                chests.put(key, new ChestOwnership(ownerUid, name, Boolean.parseBoolean(values[2])));
-            }
-        } catch (IOException | IllegalArgumentException exception) {
-            throw new IllegalStateException("Could not load chest ownership from " + dataFile, exception);
-        }
-    }
-
-    private void save() {
-        Path temporary = dataFile.resolveSibling(dataFile.getFileName() + ".tmp");
-        Properties properties = new Properties();
-        chests.forEach((key, chest) -> properties.setProperty(key,
-                Base64.getUrlEncoder().withoutPadding()
-                        .encodeToString(chest.ownerUid().getBytes(StandardCharsets.UTF_8))
-                        + ":" + Base64.getUrlEncoder().withoutPadding()
-                        .encodeToString(chest.ownerName().getBytes(StandardCharsets.UTF_8))
-                        + ":" + chest.locked()));
-        try {
-            Files.createDirectories(dataFile.getParent());
-            try (OutputStream output = Files.newOutputStream(temporary)) {
-                properties.store(output, "Rising World chest ownership and locks");
-            }
-            try {
-                Files.move(temporary, dataFile, StandardCopyOption.REPLACE_EXISTING,
-                        StandardCopyOption.ATOMIC_MOVE);
-            } catch (IOException unsupportedAtomicMove) {
-                Files.move(temporary, dataFile, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } catch (IOException exception) {
-            throw new IllegalStateException("Could not save chest ownership to " + dataFile, exception);
-        }
-    }
-
-    private static String key(long globalId, int chunkX, int chunkY, int chunkZ) {
-        return chunkX + "," + chunkY + "," + chunkZ + "," + globalId;
-    }
+    private static void bindKey(PreparedStatement statement,long globalId,int x,int y,int z)throws java.sql.SQLException{statement.setLong(1,globalId);statement.setInt(2,x);statement.setInt(3,y);statement.setInt(4,z);}
 }

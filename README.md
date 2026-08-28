@@ -112,9 +112,8 @@ live server API.
 On first use, the plugin creates slot 1 as a legacy character before changing
 the player. It captures the existing name, inventory, clothing, appearance,
 position, rotation, health, hunger, thirst, stamina, balance, and claims.
-Character-controlled data is stored beneath
-`Worlds/<world>/CivicCore/characters/` and autosaved every 60 seconds as well
-as on disconnect and plugin shutdown.
+Character-controlled data is stored in the world-scoped CivicCore database and
+autosaved every 60 seconds as well as on disconnect and plugin shutdown.
 
 Balances, salary, claims, inventory, appearance, status, position, and future
 skill data are character-specific. Administrator status, claim-administrator
@@ -178,6 +177,8 @@ for commands, storage, protection behavior, and the public service API.
 
 ## Subsystem documentation
 
+- [Database](src/com/example/risingworldstarter/database/README.md) explains the
+  storage abstraction, SQLite backend, schema location, and configuration boundary.
 - [Economy](src/com/example/risingworldstarter/economy/README.md) covers balances,
   configuration, payroll, persistence, and the public economy API.
 - [Land claims](src/com/example/risingworldstarter/claims/README.md) covers chunk
