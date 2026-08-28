@@ -82,6 +82,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Minimal entry point for a Rising World (Unity version) plugin.
  */
 public final class CivicCore extends Plugin implements Listener {
+    private static final int CLAIM_OVERVIEW_RADIUS = 10;
     private static final int[] SKIN_COLORS = {
             0xF1C27D, 0xE0AC69, 0xC68642, 0xA66A3F, 0x8D5524, 0x5C3317
     };
@@ -1288,42 +1289,66 @@ public final class CivicCore extends Plugin implements Listener {
             return;
         }
         if (ownedChunks.isEmpty()) {
-            clearClaimVisuals(player);
-            player.sendTextMessage("<color=#AAAAAA>You do not own any chunks.</color>");
-            return;
-        }
-
-        player.sendTextMessage("<color=#E8C547>Your claimed chunks (" + ownedChunks.size() + "):</color>");
-        StringBuilder line = new StringBuilder();
-        for (ClaimedChunk chunk : ownedChunks) {
-            String coordinate = "[" + chunk.x() + ", " + chunk.z() + "]";
-            if (!line.isEmpty() && line.length() + coordinate.length() + 2 > 90) {
-                player.sendTextMessage(line.toString());
-                line.setLength(0);
+            player.sendTextMessage("<color=#AAAAAA>You do not personally own any chunks.</color>");
+        } else {
+            player.sendTextMessage("<color=#E8C547>Your claimed chunks (" + ownedChunks.size() + "):</color>");
+            StringBuilder line = new StringBuilder();
+            for (ClaimedChunk chunk : ownedChunks) {
+                String coordinate = "[" + chunk.x() + ", " + chunk.z() + "]";
+                if (!line.isEmpty() && line.length() + coordinate.length() + 2 > 90) {
+                    player.sendTextMessage(line.toString());
+                    line.setLength(0);
+                }
+                if (!line.isEmpty()) line.append(", ");
+                line.append(coordinate);
             }
-            if (!line.isEmpty()) {
-                line.append(", ");
-            }
-            line.append(coordinate);
-        }
-        if (!line.isEmpty()) {
-            player.sendTextMessage(line.toString());
+            if (!line.isEmpty()) player.sendTextMessage(line.toString());
         }
 
         clearClaimVisuals(player);
+        Vector3i center = player.getChunkPosition();
+        int minimumX = center.x - CLAIM_OVERVIEW_RADIUS;
+        int maximumX = center.x + CLAIM_OVERVIEW_RADIUS;
+        int minimumZ = center.z - CLAIM_OVERVIEW_RADIUS;
+        int maximumZ = center.z + CLAIM_OVERVIEW_RADIUS;
+        Map<ClaimedChunk, Claim> nearbyClaims = claims.getClaimsInArea(
+                minimumX, maximumX, minimumZ, maximumZ);
+        String clanOwnerId = groups.findByMember(characterKey).map(Group::claimOwnerId).orElse(null);
         float groundY = player.getPosition().y - 0.15f;
-        List<Area3D> visuals = new ArrayList<>(ownedChunks.size());
-        for (ClaimedChunk chunk : ownedChunks) {
-            Area3D visual = createChunkVisual(chunk.x(), chunk.z(), groundY,
-                    0.15f, 0.45f, 1.0f, 0.12f,
-                    0.30f, 0.65f, 1.0f, 0.95f);
-            visuals.add(visual);
-            player.addGameObject(visual);
+        int sideLength = CLAIM_OVERVIEW_RADIUS * 2 + 1;
+        List<Area3D> visuals = new ArrayList<>(sideLength * sideLength);
+        for (int chunkX = minimumX; chunkX <= maximumX; chunkX++) {
+            for (int chunkZ = minimumZ; chunkZ <= maximumZ; chunkZ++) {
+                Claim claim = nearbyClaims.get(new ClaimedChunk(chunkX, chunkZ));
+                Area3D visual;
+                if (claim == null) {
+                    visual = createChunkVisual(chunkX, chunkZ, groundY,
+                            0.15f, 0.85f, 0.30f, 0.12f,
+                            0.25f, 1.0f, 0.40f, 0.95f);
+                } else if (claim.ownerUid().equals(characterKey)) {
+                    visual = createChunkVisual(chunkX, chunkZ, groundY,
+                            0.15f, 0.45f, 1.0f, 0.12f,
+                            0.30f, 0.65f, 1.0f, 0.95f);
+                } else if (claim.ownerUid().equals(clanOwnerId)) {
+                    visual = createChunkVisual(chunkX, chunkZ, groundY,
+                            1.0f, 0.50f, 0.08f, 0.12f,
+                            1.0f, 0.65f, 0.18f, 0.95f);
+                } else {
+                    visual = createChunkVisual(chunkX, chunkZ, groundY,
+                            1.0f, 0.15f, 0.15f, 0.12f,
+                            1.0f, 0.30f, 0.30f, 0.95f);
+                }
+                visuals.add(visual);
+                player.addGameObject(visual);
+            }
         }
         claimVisuals.put(player.getUID(), visuals);
         visualModes.put(player.getUID(), "claims");
         visualHeights.put(player.getUID(), groundY);
-        player.sendTextMessage("<color=#77AAFF>Showing all owned claim squares. Use /claims again to hide them.</color>");
+        player.sendTextMessage("<color=#77AAFF>Blue: yours</color> | <color=#77FF77>Green: available</color>"
+                + " | <color=#FF991F>Orange: your clan</color> | <color=#FF5555>Red: unavailable</color>");
+        player.sendTextMessage("<color=#AAAAAA>Showing a " + sideLength + "x" + sideLength
+                + " chunk area around you. Use /claims again to hide it.</color>");
     }
 
     private void claimCurrentChunk(Player player) {

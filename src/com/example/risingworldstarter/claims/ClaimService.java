@@ -10,6 +10,8 @@ import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 
@@ -36,6 +38,25 @@ public final class ClaimService {
                 try (ResultSet result = query.executeQuery()) { while (result.next()) chunks.add(new ClaimedChunk(result.getInt(1), result.getInt(2))); }
             }
             return List.copyOf(chunks);
+        });
+    }
+
+    /** Returns all claims inside an inclusive chunk-coordinate square in one query. */
+    public Map<ClaimedChunk, Claim> getClaimsInArea(int minimumX, int maximumX,
+                                                    int minimumZ, int maximumZ) {
+        return database.read(connection -> {
+            Map<ClaimedChunk, Claim> result = new LinkedHashMap<>();
+            try (PreparedStatement query = connection.prepareStatement(
+                    "SELECT chunk_x,chunk_z,owner_id,owner_name FROM claims "
+                            + "WHERE chunk_x BETWEEN ? AND ? AND chunk_z BETWEEN ? AND ?")) {
+                query.setInt(1, minimumX); query.setInt(2, maximumX);
+                query.setInt(3, minimumZ); query.setInt(4, maximumZ);
+                try (ResultSet rows = query.executeQuery()) {
+                    while (rows.next()) result.put(new ClaimedChunk(rows.getInt(1), rows.getInt(2)),
+                            new Claim(rows.getString(3), rows.getString(4)));
+                }
+            }
+            return Map.copyOf(result);
         });
     }
 
