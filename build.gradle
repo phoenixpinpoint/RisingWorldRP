@@ -13,7 +13,7 @@ if (providers.gradleProperty('alternateBuildDir').present) {
 }
 
 group = 'com.example'
-version = '0.8.1'
+version = '0.8.2'
 
 def configuredRisingWorldPath = providers.gradleProperty('risingWorldPath')
         .orElse(providers.environmentVariable('RISING_WORLD_PATH'))
@@ -67,8 +67,8 @@ def sdkJar = findSdkJar(risingWorldDirectory)
 sourceSets {
     main {
         java.srcDirs = ['src']
-        resources.srcDirs = ['.']
-        resources.include 'resources/**'
+        resources.srcDirs = ['.', 'src']
+        resources.include 'resources/**', 'com/example/risingworldstarter/database/schema.sql'
     }
 }
 

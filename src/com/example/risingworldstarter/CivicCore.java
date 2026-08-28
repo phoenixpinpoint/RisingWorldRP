@@ -927,7 +927,7 @@ public final class CivicCore extends Plugin implements Listener {
         if (previous != null) player.removeUIElement(previous.window());
 
         String version = getClass().getPackage().getImplementationVersion();
-        if (version == null || version.isBlank()) version = "0.7.2";
+        if (version == null || version.isBlank()) version = "0.8.2";
 
         UIElement window = new UIElement();
         window.setPosition(50f, 50f, true);
