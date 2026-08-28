@@ -256,13 +256,12 @@ server and claim administrators can also open and manage them. Chest ownership
 and lock state are stored in the world's `chests.properties` file and removed
 when the chest is destroyed.
 
-### Automatic window trim
+## Subsystem documentation
 
-Placing a window into a solid block wall automatically removes the block cells
-intersecting the opening. The frame remains in place and the surrounding
-wall blocks are left unchanged. The carve follows the placed frame's horizontal
-rotation and uses Rising World's solid-terrain restriction so air, water, and
-unrelated non-block elements are not modified.
+- [Command system](src/com/example/risingworldstarter/commands/README.md) explains
+  command registration, actions, aliases, `/help`, and external-plugin cleanup.
+- [Automatic window trim](src/com/example/risingworldstarter/autotrim/README.md)
+  explains the window-opening carve behavior and service integration.
 
 ## World and server isolation
 

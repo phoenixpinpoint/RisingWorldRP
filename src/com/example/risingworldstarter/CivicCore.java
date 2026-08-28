@@ -1,6 +1,9 @@
 package com.example.risingworldstarter;
 
 import com.example.risingworldstarter.autotrim.WindowTrimService;
+import com.example.risingworldstarter.commands.CommandAction;
+import com.example.risingworldstarter.commands.CommandRegistry;
+import com.example.risingworldstarter.commands.RegisteredCommand;
 import net.risingworld.api.Plugin;
 import net.risingworld.api.Server;
 import net.risingworld.api.Timer;
@@ -99,6 +102,7 @@ public final class CivicCore extends Plugin implements Listener {
     private final Map<String, Integer> lastEquippedConstructionIds = new ConcurrentHashMap<>();
     private final Map<String, Vector3f> lastEquippedConstructionSizes = new ConcurrentHashMap<>();
     private final Map<String, Long> autoTrimScheduledAt = new ConcurrentHashMap<>();
+    private final CommandRegistry commandRegistry = new CommandRegistry();
     private EconomyApi economy;
     private ClaimService claims;
     private ClaimAdminService claimAdmins;
@@ -167,6 +171,7 @@ public final class CivicCore extends Plugin implements Listener {
         debug(String.format(Locale.US, "World clock initialized: %d-%d-%d %02d:%02d",
                 currentTime.getYear(), currentTime.getMonth(), currentTime.getDay(),
                 currentTime.getHours(), currentTime.getMinutes()));
+        registerCommands();
         registerEventListener(this);
         debug("Event listener registered");
         executeDelayed(0.5f, () -> {
@@ -182,7 +187,8 @@ public final class CivicCore extends Plugin implements Listener {
         characterAutosaveTimer = new Timer(60f, 60f, -1, this::saveActiveCharacters);
         characterAutosaveTimer.start();
         debug("World clock and payroll timer started; payroll runs at 00:00, 08:00, and 16:00");
-        debug("Commands registered: /about, /characters, /syncappearance, /balance, /bal, /store, /admin, /claim, /unclaim, /chunk, /claims, /claimadmin, /chest");
+        debug("Commands registered: " + commandRegistry.getCommands().stream()
+                .map(RegisteredCommand::name).toList());
         System.out.println("[CivicCore] Enabled on Rising World " + getGameVersion());
     }
 
@@ -327,6 +333,11 @@ public final class CivicCore extends Plugin implements Listener {
             throw new IllegalStateException("Economy is not available before the plugin is enabled");
         }
         return economy;
+    }
+
+    /** Returns the shared registry so other plugins can register commands and actions. */
+    public CommandRegistry getCommandRegistry() {
+        return commandRegistry;
     }
 
     /** Returns the economy/claim identity for the player's selected character. */
@@ -714,54 +725,67 @@ public final class CivicCore extends Plugin implements Listener {
     @EventMethod
     public void onPlayerCommand(PlayerCommandEvent event) {
         String[] parts = event.getCommand().trim().split("\\s+", 3);
-        String command = parts[0];
-        if (command.equalsIgnoreCase("/about")) {
-            event.setCancelled(true);
-            showAbout(event.getPlayer());
+        RegisteredCommand command = commandRegistry.find(parts[0]);
+        if (command == null) {
             return;
         }
-        if (!activeCharacters.containsKey(event.getPlayer().getUID())) {
-            event.setCancelled(true);
+        event.setCancelled(true);
+        if (command.requiresCharacter() && !activeCharacters.containsKey(event.getPlayer().getUID())) {
             event.getPlayer().sendTextMessage("<color=#FFAA66>Select or create a character first.</color>");
             return;
         }
-        if (command.equalsIgnoreCase("/characters") || command.equalsIgnoreCase("/character")
-                || command.equalsIgnoreCase("/chars")) {
-            event.setCancelled(true);
-            openCharacterSwitcher(event.getPlayer());
-        } else if (command.equalsIgnoreCase("/syncappearance")) {
-            event.setCancelled(true);
-            syncProfileAppearance(event.getPlayer());
-        } else if (command.equalsIgnoreCase("/balance") || command.equalsIgnoreCase("/bal")) {
-            event.setCancelled(true);
-            Player player = event.getPlayer();
-            String formattedBalance = formatBalance(economy.getBalance(characterKey(player)));
-            player.sendTextMessage("<color=#E8C547>Cash:</color> " + formattedBalance);
-            updateBalanceLabel(player);
-        } else if (command.equalsIgnoreCase("/store")) {
-            event.setCancelled(true);
-            toggleStore(event.getPlayer());
-        } else if (command.equalsIgnoreCase("/admin")) {
-            event.setCancelled(true);
-            toggleAdminDashboard(event.getPlayer());
-        } else if (command.equalsIgnoreCase("/claim")) {
-            event.setCancelled(true);
-            claimCurrentChunk(event.getPlayer());
-        } else if (command.equalsIgnoreCase("/unclaim")) {
-            event.setCancelled(true);
-            unclaimCurrentChunk(event.getPlayer());
-        } else if (command.equalsIgnoreCase("/chunk")) {
-            event.setCancelled(true);
-            showCurrentChunk(event.getPlayer(), true);
-        } else if (command.equalsIgnoreCase("/claims")) {
-            event.setCancelled(true);
-            listOwnedChunks(event.getPlayer());
-        } else if (command.equalsIgnoreCase("/claimadmin")) {
-            event.setCancelled(true);
-            handleClaimAdminCommand(event.getPlayer(), parts);
-        } else if (command.equalsIgnoreCase("/chest")) {
-            event.setCancelled(true);
-            handleChestCommand(event.getPlayer(), parts);
+        command.action().execute(event.getPlayer(), parts);
+    }
+
+    private void registerCommands() {
+        commandRegistry.unregisterOwner("CivicCore");
+        registerCommand("/help", "Show available CivicCore commands.", false, List.of(),
+                (player, parts) -> showHelp(player));
+        registerCommand("/about", "Show CivicCore information and version.", false, List.of(),
+                (player, parts) -> showAbout(player));
+        registerCommand("/characters", "Open the character selector.", true,
+                List.of("/character", "/chars"), (player, parts) -> openCharacterSwitcher(player));
+        registerCommand("/syncappearance", "Copy your current profile appearance.", true, List.of(),
+                (player, parts) -> syncProfileAppearance(player));
+        registerCommand("/balance", "Show your current cash balance.", true, List.of("/bal"),
+                (player, parts) -> {
+                    String formattedBalance = formatBalance(economy.getBalance(characterKey(player)));
+                    player.sendTextMessage("<color=#E8C547>Cash:</color> " + formattedBalance);
+                    updateBalanceLabel(player);
+                });
+        registerCommand("/store", "Open or close the marketplace.", true, List.of(),
+                (player, parts) -> toggleStore(player));
+        registerCommand("/admin", "Open the administrator dashboard.", true, List.of(),
+                (player, parts) -> toggleAdminDashboard(player));
+        registerCommand("/claim", "Claim your current chunk.", true, List.of(),
+                (player, parts) -> claimCurrentChunk(player));
+        registerCommand("/unclaim", "Release your current chunk.", true, List.of(),
+                (player, parts) -> unclaimCurrentChunk(player));
+        registerCommand("/chunk", "Show the current chunk and its owner.", true, List.of(),
+                (player, parts) -> showCurrentChunk(player, true));
+        registerCommand("/claims", "List and toggle your claimed chunks.", true, List.of(),
+                (player, parts) -> listOwnedChunks(player));
+        registerCommand("/claimadmin <add|remove|list> [player]", "Manage claim administrators.", true,
+                List.of(), this::handleClaimAdminCommand);
+        registerCommand("/chest <lock|unlock|status>", "Manage the chest you are looking at.", true,
+                List.of(), this::handleChestCommand);
+    }
+
+    private void registerCommand(String usage, String description, boolean requiresCharacter,
+                                 List<String> aliases, CommandAction action) {
+        String primaryName = usage.split("\\s+", 2)[0];
+        commandRegistry.register("CivicCore", primaryName, usage, description,
+                requiresCharacter, aliases, action);
+    }
+
+    private void showHelp(Player player) {
+        player.sendTextMessage("<color=#E8C547>--- CivicCore Commands ---</color>");
+        for (RegisteredCommand command : commandRegistry.getCommands()) {
+            String aliases = command.aliases().isEmpty()
+                    ? ""
+                    : " <color=#888888>(aliases: " + String.join(", ", command.aliases()) + ")</color>";
+            player.sendTextMessage("<color=#77AAFF>" + command.usage() + "</color>" + aliases
+                    + " - " + command.description());
         }
     }
 
