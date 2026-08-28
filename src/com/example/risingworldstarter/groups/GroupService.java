@@ -45,6 +45,7 @@ public final class GroupService {
                 insert.setString(1, ownerKey); insert.setString(2, id); insert.setString(3, ownerName);
                 insert.executeUpdate();
             }
+            setBalance(connection, "group:" + id, 0L);
             return requireGroup(connection, id);
         });
     }
@@ -144,7 +145,11 @@ public final class GroupService {
             Group group = requireGroup(connection, groupId);
             if (requireMember(group, ownerKey).role() != GroupRole.OWNER)
                 throw new IllegalStateException("Only the clan owner can disband it.");
+            String groupAccount = group.claimOwnerId();
+            if (selectBalance(connection, groupAccount) != 0L)
+                throw new IllegalStateException("Withdraw all clan funds before disbanding it.");
             execute(connection, "DELETE FROM groups WHERE group_id=?", groupId);
+            execute(connection, "DELETE FROM balances WHERE account_id=?", groupAccount);
             return group;
         });
     }
@@ -153,6 +158,44 @@ public final class GroupService {
         return database.read(connection -> exists(connection,
                 "SELECT 1 FROM group_members WHERE group_id=? AND character_key=? AND role IN ('OWNER','MANAGER')",
                 groupId, characterKey));
+    }
+
+    /** Returns the clan treasury balance after verifying the actor is an owner or manager. */
+    public long getBalance(String groupId, String actorKey) {
+        return database.read(connection -> {
+            requireManagement(requireGroup(connection, groupId), actorKey);
+            return selectBalance(connection, "group:" + groupId);
+        });
+    }
+
+    /** Atomically moves funds from the actor's character account into the clan treasury. */
+    public long deposit(String groupId, String actorKey, long amount) {
+        requirePositiveAmount(amount);
+        return database.transaction(connection -> {
+            requireManagement(requireGroup(connection, groupId), actorKey);
+            long characterBalance = selectBalance(connection, actorKey);
+            if (characterBalance < amount) throw new IllegalStateException("You do not have enough funds.");
+            String groupAccount = "group:" + groupId;
+            long updatedGroupBalance = Math.addExact(selectBalance(connection, groupAccount), amount);
+            setBalance(connection, actorKey, characterBalance - amount);
+            setBalance(connection, groupAccount, updatedGroupBalance);
+            return updatedGroupBalance;
+        });
+    }
+
+    /** Atomically moves funds from the clan treasury into the actor's character account. */
+    public long withdraw(String groupId, String actorKey, long amount) {
+        requirePositiveAmount(amount);
+        return database.transaction(connection -> {
+            requireManagement(requireGroup(connection, groupId), actorKey);
+            String groupAccount = "group:" + groupId;
+            long groupBalance = selectBalance(connection, groupAccount);
+            if (groupBalance < amount) throw new IllegalStateException("The clan does not have enough funds.");
+            long updatedCharacterBalance = Math.addExact(selectBalance(connection, actorKey), amount);
+            setBalance(connection, groupAccount, groupBalance - amount);
+            setBalance(connection, actorKey, updatedCharacterBalance);
+            return groupBalance - amount;
+        });
     }
 
     public List<Group> getGroups() { return database.read(connection -> {
@@ -227,6 +270,9 @@ public final class GroupService {
     private static GroupMember requireManagement(Group group, String key) { GroupMember member = requireMember(group, key); if (member.role() == GroupRole.MEMBER) throw new IllegalStateException("A clan owner or manager is required."); return member; }
     private static boolean exists(Connection c, String sql, String... values) throws java.sql.SQLException { return selectString(c, sql, values).isPresent(); }
     private static Optional<String> selectString(Connection c, String sql, String... values) throws java.sql.SQLException { try (PreparedStatement q = c.prepareStatement(sql)) { for (int i=0;i<values.length;i++) q.setString(i+1, values[i]); try (ResultSet rows=q.executeQuery()) { return rows.next()?Optional.ofNullable(rows.getString(1)):Optional.empty(); } } }
+    private static long selectBalance(Connection connection, String accountId) throws java.sql.SQLException { try (PreparedStatement query=connection.prepareStatement("SELECT balance FROM balances WHERE account_id=?")) { query.setString(1,accountId); try(ResultSet row=query.executeQuery()){return row.next()?row.getLong(1):0L;} } }
+    private static void setBalance(Connection connection, String accountId, long amount) throws java.sql.SQLException { try (PreparedStatement statement=connection.prepareStatement("INSERT INTO balances(account_id,balance) VALUES(?,?) ON CONFLICT(account_id) DO UPDATE SET balance=excluded.balance")) { statement.setString(1,accountId); statement.setLong(2,amount); statement.executeUpdate(); } }
+    private static void requirePositiveAmount(long amount) { if(amount<=0)throw new IllegalArgumentException("Amount must be greater than zero."); }
     private static void execute(Connection c, String sql, String... values) throws java.sql.SQLException { try (PreparedStatement q=c.prepareStatement(sql)) { for(int i=0;i<values.length;i++)q.setString(i+1,values[i]); q.executeUpdate(); } }
     private static String decode(String value) { return new String(Base64.getUrlDecoder().decode(value), StandardCharsets.UTF_8); }
     private static String requireText(String value, String field) { if(value==null||value.isBlank())throw new IllegalArgumentException(field+" cannot be blank"); String result=value.trim(); if(result.length()>32)throw new IllegalArgumentException(field+" cannot exceed 32 characters"); return result; }

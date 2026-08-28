@@ -10,4 +10,11 @@ ordinary members and manage clan land. All members can access clan-owned chunks,
 which use the stable claim owner identity `group:<group-id>`.
 
 Commands include `/clan create`, `info`, `invite`, `accept`, `leave`, `kick`,
-`promote`, `demote`, `claim`, `unclaim`, and `disband`. `/group` is an alias.
+`promote`, `demote`, `balance`, `deposit`, `withdraw`, `claim`, `unclaim`, and
+`disband`. `/group` is an alias.
+
+Each clan has a treasury account under its stable `group:<group-id>` identity.
+Owners and managers can view its balance, deposit funds from their active
+character account, and withdraw funds back to that account. Each transfer is a
+single database transaction. A funded clan must empty its treasury before it
+can be disbanded.

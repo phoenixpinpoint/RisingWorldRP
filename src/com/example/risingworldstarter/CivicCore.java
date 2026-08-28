@@ -63,6 +63,8 @@ import net.risingworld.api.worldelements.Area3D;
 import net.risingworld.api.worldelements.GameObject;
 
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -834,6 +836,9 @@ public final class CivicCore extends Plugin implements Listener {
                 new CommandHelp("/clan kick <character>", "Remove a clan member."),
                 new CommandHelp("/clan promote <character>", "Promote a member to manager."),
                 new CommandHelp("/clan demote <character>", "Demote a manager to member."),
+                new CommandHelp("/clan balance", "View the clan treasury."),
+                new CommandHelp("/clan deposit <amount>", "Deposit personal funds into the clan treasury."),
+                new CommandHelp("/clan withdraw <amount>", "Withdraw clan funds to your character."),
                 new CommandHelp("/clan claim", "Purchase the current chunk for the clan."),
                 new CommandHelp("/clan unclaim", "Release the current clan-owned chunk."),
                 new CommandHelp("/clan disband", "Disband the clan and release its claims.")), this::handleClanCommand);
@@ -1123,6 +1128,21 @@ public final class CivicCore extends Plugin implements Listener {
                     else groups.setManager(group.id(), characterKey, characterKey(target), action.equals("promote"));
                     player.sendTextMessage("<color=#77FF99>Clan membership updated for " + target.getName() + ".</color>");
                 }
+                case "balance" -> {
+                    Group group = requireManagedClan(characterKey);
+                    player.sendTextMessage("<color=#E8C547>" + group.name() + " treasury:</color> "
+                            + formatBalance(groups.getBalance(group.id(), characterKey)));
+                }
+                case "deposit", "withdraw" -> {
+                    if (parts.length != 3) throw new IllegalArgumentException("Usage: /clan " + action + " <amount>");
+                    Group group = requireManagedClan(characterKey);
+                    long amount = parseCurrencyAmount(parts[2]);
+                    long balance = action.equals("deposit")
+                            ? groups.deposit(group.id(), characterKey, amount)
+                            : groups.withdraw(group.id(), characterKey, amount);
+                    updateBalanceLabel(player);
+                    player.sendTextMessage("<color=#77FF99>Clan treasury balance: " + formatBalance(balance) + ".</color>");
+                }
                 case "claim" -> claimCurrentChunkForClan(player, characterKey);
                 case "unclaim" -> unclaimCurrentChunkForClan(player, characterKey);
                 case "disband" -> {
@@ -1152,6 +1172,14 @@ public final class CivicCore extends Plugin implements Listener {
         }
         player.sendTextMessage("<color=#AAAAAA>Clan claims: "
                 + claims.getClaimsByOwner(group.claimOwnerId()).size() + "</color>");
+    }
+
+    private Group requireManagedClan(String characterKey) {
+        Group group = groups.findByMember(characterKey)
+                .orElseThrow(() -> new IllegalStateException("You do not belong to a clan."));
+        if (!groups.canManage(group.id(), characterKey))
+            throw new IllegalStateException("Only a clan owner or manager can manage clan funds.");
+        return group;
     }
 
     private void claimCurrentChunkForClan(Player player, String characterKey) {
@@ -1199,7 +1227,7 @@ public final class CivicCore extends Plugin implements Listener {
 
     private static void sendClanUsage(Player player) {
         player.sendTextMessage("<color=#E8C547>Clan commands:</color> create, info, invite, accept, leave, "
-                + "kick, promote, demote, claim, unclaim, disband");
+                + "kick, promote, demote, balance, deposit, withdraw, claim, unclaim, disband");
     }
 
     private ChestOwnership getOrAssignChest(long globalId, int chunkX, int chunkY, int chunkZ) {
@@ -2491,6 +2519,17 @@ public final class CivicCore extends Plugin implements Listener {
     private static String formatBalance(long minorUnits) {
         NumberFormat currency = NumberFormat.getCurrencyInstance(Locale.US);
         return currency.format(minorUnits / 100.0);
+    }
+
+    private static long parseCurrencyAmount(String value) {
+        try {
+            long amount = new BigDecimal(value).movePointRight(2)
+                    .setScale(0, RoundingMode.UNNECESSARY).longValueExact();
+            if (amount <= 0) throw new IllegalArgumentException("Amount must be greater than zero.");
+            return amount;
+        } catch (ArithmeticException | NumberFormatException exception) {
+            throw new IllegalArgumentException("Enter a valid amount with no more than two decimal places.");
+        }
     }
 
     private record PayPeriod(int year, int month, int day, int period) {
