@@ -1,4 +1,4 @@
-# Rising World Starter Plugin
+# CivicCore
 
 This is a minimal Java project for the **Rising World Unity-version Plugin API**.
 It compiles against the SDK included with your copy of Rising World, so its API matches your game installation.
@@ -38,11 +38,11 @@ On Windows, use `gradlew.bat` in the examples above. The resolution order is the
 `-PrisingWorldPath` Gradle property, `RISING_WORLD_PATH` environment
 variable, then `config/build.config.json`.
 
-The finished plugin is `build/RisingWorldStarter.jar`.
+The finished plugin is `build/CivicCore.jar`.
 
 ## Install for testing
 
-Run this to build and install it into Rising World's `Plugins/RisingWorldStarter` directory:
+Run this to build and install it into Rising World's `Plugins/CivicCore` directory:
 
 ```text
 ./gradlew installPlugin -PrisingWorldPath="/path/to/Rising World"
@@ -51,6 +51,10 @@ Run this to build and install it into Rising World's `Plugins/RisingWorldStarter
 `installPlugin` installs only the JAR and never copies configuration files, so
 an existing server configuration is protected. To explicitly copy the project
 templates from `config/` into the plugin directory, run:
+
+During the rename migration, `installPlugin` also removes only the obsolete
+`Plugins/RisingWorldStarter/RisingWorldStarter.jar`. It leaves the legacy
+directory and configuration files in place so CivicCore can migrate them.
 
 ```text
 ./gradlew installConfig -PrisingWorldPath="/path/to/Rising World"
@@ -62,10 +66,14 @@ intend to update the defaults used by newly initialized worlds. Existing
 world-specific configuration is never overwritten. On Windows, use
 `gradlew.bat`.
 
-Restart the game/server. Its console/log should report `[RisingWorldStarter] Enabled ...`.
-Startup also writes `[RisingWorldStarter/DEBUG]` diagnostics showing the resolved
+Restart the game/server. Its console/log should report `[CivicCore] Enabled ...`.
+Startup also writes `[CivicCore/DEBUG]` diagnostics showing the resolved
 data directory, loaded configuration, enabled marketplace item count, current
 world time, payroll schedule, event registration, and available commands.
+
+Use `/about` in chat to display the plugin name, installed version, basic feature
+summary, author, and license. This command is available even before selecting a
+character.
 
 Server administrators can use `/admin` to open an in-game dashboard showing
 world time, player counts, claim totals, economy settings, enabled marketplace
@@ -83,7 +91,7 @@ The top-center HUD shows the current in-world year, month, day, and 24-hour
 clock. It follows the server's world calendar and refreshes once per second.
 
 Balances are stored as integer minor units (cents) in
-`Worlds/<world>/RisingWorldStarter/balances.properties`. New players start with
+`Worlds/<world>/CivicCore/balances.properties`. New players start with
 `$25,000.00`, and claiming a chunk costs `$10,000.00`.
 
 These values can be changed in `config/economy.properties` before explicitly
@@ -102,8 +110,8 @@ skips the night, so sleeping through midnight cannot miss payday.
 Other plugins can access the API through the loaded plugin instance:
 
 ```java
-RisingWorldStarter economyPlugin =
-        (RisingWorldStarter) getPluginByName("RisingWorldStarter");
+CivicCore economyPlugin =
+        (CivicCore) getPluginByName("CivicCore");
 EconomyApi economy = economyPlugin.getEconomyApi();
 String characterKey = economyPlugin.getActiveCharacterKey(player);
 
@@ -134,7 +142,7 @@ On first use, the plugin creates slot 1 as a legacy character before changing
 the player. It captures the existing name, inventory, clothing, appearance,
 position, rotation, health, hunger, thirst, stamina, balance, and claims.
 Character-controlled data is stored beneath
-`Worlds/<world>/RisingWorldStarter/characters/` and autosaved every 60 seconds as well
+`Worlds/<world>/CivicCore/characters/` and autosaved every 60 seconds as well
 as on disconnect and plugin shutdown.
 
 Balances, salary, claims, inventory, appearance, status, position, and future
@@ -161,7 +169,7 @@ buttons. Checkout charges the cart once; products that cannot fit in the
 inventory are refunded and remain in the cart for the player to retry.
 
 On first startup the plugin generates
-`Plugins/RisingWorldStarter/marketplace.json`. Each item has an object like:
+`Plugins/CivicCore/marketplace.json`. Each item has an object like:
 
 ```json
 {
@@ -194,7 +202,7 @@ the plugin imports it once and writes the equivalent JSON file.
 ## Land claims
 
 Land ownership is stored by horizontal chunk in
-`Worlds/<world>/RisingWorldStarter/claims.properties`. Available chat commands:
+`Worlds/<world>/CivicCore/claims.properties`. Available chat commands:
 
 - `/claim` claims the chunk where you are standing.
 - `/chunk` reports the current chunk coordinates and owner, and draws its boundary.
@@ -260,15 +268,15 @@ unrelated non-block elements are not modified.
 
 Characters, inventories, balances, claims, and administrator assignments are
 isolated by Rising World's own world directory. Starting another world or
-server uses its separate `Worlds/<world>/RisingWorldStarter/`
+server uses its separate `Worlds/<world>/CivicCore/`
 directory, preventing characters and inventories from crossing between worlds. On the first launch after upgrading, legacy
-global data and the previous `plugins/RisingWorldStarter` world data are copied
+global data and previous `RisingWorldStarter` world data are copied
 into the currently loaded world once; the original files
 remain in place as a recovery backup.
 
 Each enabled world directory contains its own `plugin.properties`,
 `economy.properties`, and `marketplace.json`. A world must explicitly contain
-`Worlds/<world>/RisingWorldStarter/plugin.properties` or the plugin does
+`Worlds/<world>/CivicCore/plugin.properties` or the plugin does
 nothing for that world. When the opt-in file exists, root economy and marketplace
 copies are used as templates for any missing world configuration. Set
 `enabled=false` to temporarily disable an opted-in world without removing the

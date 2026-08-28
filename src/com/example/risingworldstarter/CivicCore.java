@@ -59,7 +59,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Minimal entry point for a Rising World (Unity version) plugin.
  */
-public final class RisingWorldStarter extends Plugin implements Listener {
+public final class CivicCore extends Plugin implements Listener {
     private static final int[] SKIN_COLORS = {
             0xF1C27D, 0xE0AC69, 0xC68642, 0xA66A3F, 0x8D5524, 0x5C3317
     };
@@ -86,6 +86,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     private final Map<String, Float> visualHeights = new ConcurrentHashMap<>();
     private final Map<String, StoreView> storeViews = new ConcurrentHashMap<>();
     private final Map<String, AdminView> adminViews = new ConcurrentHashMap<>();
+    private final Map<String, AboutView> aboutViews = new ConcurrentHashMap<>();
     private final Map<String, CharacterService.CharacterSummary> activeCharacters = new ConcurrentHashMap<>();
     private final Map<String, String> activeClaimIdentities = new ConcurrentHashMap<>();
     private final Map<String, CharacterSelectionView> characterSelectionViews = new ConcurrentHashMap<>();
@@ -123,11 +124,11 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         // Keep persistent data directly in the game's world save. Steam Cloud
         // synchronizes world content, but plugin-installation folders are not
         // part of the portable save on every platform.
-        Path worldDataPath = worldFolder.resolve("RisingWorldStarter");
+        Path worldDataPath = worldFolder.resolve("CivicCore");
         debug("World-scoped data directory: " + worldDataPath);
         prepareWorldDataDirectory(pluginPath, worldDataPath);
         if (!isEnabledForWorld(worldDataPath.resolve("plugin.properties"))) {
-            System.out.println("[RisingWorldStarter] Not enabled for world " + World.getName()
+            System.out.println("[CivicCore] Not enabled for world " + World.getName()
                     + ": create " + worldDataPath.resolve("plugin.properties") + " to opt in");
             return;
         }
@@ -142,7 +143,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         debug("Chest ownership and locks loaded");
         characterService = new CharacterService(worldDataPath.resolve("characters"));
         debug("Character service loaded with four slots per account");
-        windowTrimService = new WindowTrimService(RisingWorldStarter::debug);
+        windowTrimService = new WindowTrimService(CivicCore::debug);
         debug("Window auto-trim service loaded");
 
         Path economyConfigPath = worldDataPath.resolve("economy.properties");
@@ -181,21 +182,28 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         characterAutosaveTimer = new Timer(60f, 60f, -1, this::saveActiveCharacters);
         characterAutosaveTimer.start();
         debug("World clock and payroll timer started; payroll runs at 00:00, 08:00, and 16:00");
-        debug("Commands registered: /characters, /syncappearance, /balance, /bal, /store, /admin, /claim, /unclaim, /chunk, /claims, /claimadmin, /chest");
-        System.out.println("[RisingWorldStarter] Enabled on Rising World " + getGameVersion());
+        debug("Commands registered: /about, /characters, /syncappearance, /balance, /bal, /store, /admin, /claim, /unclaim, /chunk, /claims, /claimadmin, /chest");
+        System.out.println("[CivicCore] Enabled on Rising World " + getGameVersion());
     }
 
     private void prepareWorldDataDirectory(Path pluginPath, Path worldDataPath) {
         Path worldFolder = World.getWorldFolder().toPath().toAbsolutePath().normalize();
-        Path previousWorldDataPath = worldFolder.resolve("plugins").resolve("RisingWorldStarter");
+        Path previousWorldDataPath = worldFolder.resolve("RisingWorldStarter");
+        Path olderWorldDataPath = worldFolder.resolve("plugins").resolve("RisingWorldStarter");
 
         try {
             Files.createDirectories(worldDataPath);
             copyLegacyFile(previousWorldDataPath.resolve("plugin.properties"),
                     worldDataPath.resolve("plugin.properties"));
+            copyLegacyFile(olderWorldDataPath.resolve("plugin.properties"),
+                    worldDataPath.resolve("plugin.properties"));
             copyLegacyFile(previousWorldDataPath.resolve("economy.properties"),
                     worldDataPath.resolve("economy.properties"));
+            copyLegacyFile(olderWorldDataPath.resolve("economy.properties"),
+                    worldDataPath.resolve("economy.properties"));
             copyLegacyFile(previousWorldDataPath.resolve("marketplace.json"),
+                    worldDataPath.resolve("marketplace.json"));
+            copyLegacyFile(olderWorldDataPath.resolve("marketplace.json"),
                     worldDataPath.resolve("marketplace.json"));
             copyLegacyFile(pluginPath.resolve("economy.properties"),
                     worldDataPath.resolve("economy.properties"));
@@ -208,15 +216,21 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                         || Files.exists(previousWorldDataPath.resolve("claim-admins.properties"))
                         || Files.exists(previousWorldDataPath.resolve("chests.properties"))
                         || Files.isDirectory(previousWorldDataPath.resolve("characters"));
+                boolean hasOlderWorldData = Files.exists(olderWorldDataPath.resolve("balances.properties"))
+                        || Files.exists(olderWorldDataPath.resolve("claims.properties"))
+                        || Files.exists(olderWorldDataPath.resolve("claim-admins.properties"))
+                        || Files.exists(olderWorldDataPath.resolve("chests.properties"))
+                        || Files.isDirectory(olderWorldDataPath.resolve("characters"));
                 boolean hasFilesInWorldRoot = Files.exists(worldFolder.resolve("balances.properties"))
                         || Files.exists(worldFolder.resolve("claims.properties"))
                         || Files.exists(worldFolder.resolve("claim-admins.properties"))
                         || Files.exists(worldFolder.resolve("chests.properties"))
                         || Files.isDirectory(worldFolder.resolve("characters"));
                 Path legacySource = hasPreviousWorldData ? previousWorldDataPath
+                        : hasOlderWorldData ? olderWorldDataPath
                         : hasFilesInWorldRoot ? worldFolder : pluginPath;
                 Path globalMigrationMarker = pluginPath.resolve("legacy-data-world.txt");
-                boolean mayImportGlobalData = hasPreviousWorldData || hasFilesInWorldRoot
+                boolean mayImportGlobalData = hasPreviousWorldData || hasOlderWorldData || hasFilesInWorldRoot
                         || !Files.exists(globalMigrationMarker);
                 if (mayImportGlobalData) {
                     copyLegacyFile(legacySource.resolve("balances.properties"),
@@ -290,6 +304,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         visualHeights.clear();
         storeViews.clear();
         adminViews.clear();
+        aboutViews.clear();
         activeCharacters.clear();
         activeClaimIdentities.clear();
         characterSelectionViews.clear();
@@ -303,7 +318,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         lastEquippedConstructionSizes.clear();
         autoTrimScheduledAt.clear();
         storeCatalogLoaded = false;
-        System.out.println("[RisingWorldStarter] Disabled");
+        System.out.println("[CivicCore] Disabled");
     }
 
     /** Returns this plugin's economy API for use by other plugins. */
@@ -373,6 +388,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         visualHeights.remove(event.getPlayer().getUID());
         storeViews.remove(event.getPlayer().getUID());
         adminViews.remove(event.getPlayer().getUID());
+        aboutViews.remove(event.getPlayer().getUID());
         characterSelectionViews.remove(event.getPlayer().getUID());
         appearanceViews.remove(event.getPlayer().getUID());
         claimProtectionNotices.remove(event.getPlayer().getUID());
@@ -699,6 +715,11 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     public void onPlayerCommand(PlayerCommandEvent event) {
         String[] parts = event.getCommand().trim().split("\\s+", 3);
         String command = parts[0];
+        if (command.equalsIgnoreCase("/about")) {
+            event.setCancelled(true);
+            showAbout(event.getPlayer());
+            return;
+        }
         if (!activeCharacters.containsKey(event.getPlayer().getUID())) {
             event.setCancelled(true);
             event.getPlayer().sendTextMessage("<color=#FFAA66>Select or create a character first.</color>");
@@ -741,6 +762,95 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         } else if (command.equalsIgnoreCase("/chest")) {
             event.setCancelled(true);
             handleChestCommand(event.getPlayer(), parts);
+        }
+    }
+
+    private void showAbout(Player player) {
+        AboutView previous = aboutViews.remove(player.getUID());
+        if (previous != null) player.removeUIElement(previous.window());
+
+        String version = getClass().getPackage().getImplementationVersion();
+        if (version == null || version.isBlank()) version = "0.7.2";
+
+        UIElement window = new UIElement();
+        window.setPosition(50f, 50f, true);
+        window.setPivot(Pivot.MiddleCenter);
+        window.setSize(680f, 340f, false);
+        window.setBackgroundColor((int) 0x161B22F8L);
+        window.setBorder(2f);
+        window.setBorderColor((int) 0xE8C547FFL);
+        window.setBorderEdgeRadius(8f, false);
+
+        UILabel title = new UILabel("CivicCore");
+        title.setPosition(28f, 22f, false);
+        title.setSize(550f, 42f, false);
+        title.setFontSize(29f);
+        title.setFontColor((int) 0xF4E3A1FFL);
+        title.setTextAlign(TextAnchor.MiddleLeft);
+        window.addChild(title);
+
+        UILabel closeButton = new UILabel("X");
+        closeButton.setPosition(630f, 18f, false);
+        closeButton.setSize(30f, 30f, false);
+        closeButton.setFontSize(18f);
+        closeButton.setFontColor((int) 0xFFFFFFFFL);
+        closeButton.setTextAlign(TextAnchor.MiddleCenter);
+        closeButton.setBackgroundColor((int) 0x8B2E35FFL);
+        closeButton.setBorderEdgeRadius(4f, false);
+        closeButton.setClickable(true);
+        window.addChild(closeButton);
+
+        UILabel versionLabel = new UILabel("Version " + version);
+        versionLabel.setPosition(30f, 70f, false);
+        versionLabel.setSize(620f, 30f, false);
+        versionLabel.setFontSize(18f);
+        versionLabel.setFontColor((int) 0xFFFFFFFFL);
+        versionLabel.setTextAlign(TextAnchor.MiddleLeft);
+        window.addChild(versionLabel);
+
+        UILabel description = new UILabel("A roleplay foundation for persistent\n"
+                + "characters, economy, marketplace,\n"
+                + "land claims, and world administration.");
+        description.setPosition(30f, 112f, false);
+        description.setSize(620f, 78f, false);
+        description.setFontSize(18f);
+        description.setFontColor((int) 0xCCCCCCFFL);
+        description.setTextAlign(TextAnchor.MiddleLeft);
+        window.addChild(description);
+
+        UILabel features = new UILabel("Persistent characters  •  Economy\n"
+                + "Marketplace  •  Land claims  •  Administration tools");
+        features.setPosition(30f, 198f, false);
+        features.setSize(620f, 58f, false);
+        features.setFontSize(16f);
+        features.setFontColor((int) 0x77AAFFFFL);
+        features.setTextAlign(TextAnchor.MiddleLeft);
+        window.addChild(features);
+
+        UILabel credits = new UILabel("Created by Adam Guthrie   |   MIT License");
+        credits.setPosition(30f, 278f, false);
+        credits.setSize(620f, 30f, false);
+        credits.setFontSize(16f);
+        credits.setFontColor((int) 0xAAAAAAFFL);
+        credits.setTextAlign(TextAnchor.MiddleCenter);
+        window.addChild(credits);
+
+        aboutViews.put(player.getUID(), new AboutView(window, closeButton));
+        player.addUIElement(window);
+        player.stopInput(true, true);
+        player.setMouseCursorVisible(true);
+    }
+
+    private void closeAbout(Player player) {
+        AboutView view = aboutViews.remove(player.getUID());
+        if (view != null) player.removeUIElement(view.window());
+        boolean anotherDialogOpen = characterSelectionViews.containsKey(player.getUID())
+                || appearanceViews.containsKey(player.getUID())
+                || adminViews.containsKey(player.getUID())
+                || storeViews.containsKey(player.getUID());
+        if (!anotherDialogOpen) {
+            player.stopInput(false, false);
+            player.setMouseCursorVisible(false);
         }
     }
 
@@ -1593,7 +1703,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         }
         String targetName = target.getName();
         target.kick("Kicked by administrator " + administrator.getName());
-        System.out.println("[RisingWorldStarter] " + administrator.getName() + " kicked " + targetName
+        System.out.println("[CivicCore] " + administrator.getName() + " kicked " + targetName
                 + " (" + targetUid + ") from the admin dashboard");
         executeDelayed(0.5f, () -> {
             AdminView view = adminViews.get(administrator.getUID());
@@ -1621,7 +1731,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                         return;
                     }
                     Server.banPlayer(targetUid, "Banned by administrator " + administrator.getName(), -1);
-                    System.out.println("[RisingWorldStarter] " + administrator.getName() + " banned "
+                    System.out.println("[CivicCore] " + administrator.getName() + " banned "
                             + targetName + " (" + targetUid + ") from the admin dashboard");
                     executeDelayed(0.5f, () -> {
                         AdminView view = adminViews.get(administrator.getUID());
@@ -2036,7 +2146,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
         lastSalaryPeriod = currentPeriod;
         long salary = economySettings.baseSalary();
         Player[] players = Server.getAllPlayers();
-        System.out.println("[RisingWorldStarter] Running 8-hour payroll for " + players.length
+        System.out.println("[CivicCore] Running 8-hour payroll for " + players.length
                 + " connected player(s) at " + currentPeriod.periodStartHour() + ":00 on "
                 + currentPeriod.year() + "-" + currentPeriod.month() + "-" + currentPeriod.day());
         for (Player player : players) {
@@ -2046,7 +2156,7 @@ public final class RisingWorldStarter extends Plugin implements Listener {
             long newBalance = economy.deposit(characterKey, salary);
             updateBalanceLabel(player);
             player.sendTextMessage("<color=#77FF99>8-hour salary paid:</color> " + formatBalance(salary));
-            System.out.println("[RisingWorldStarter] Paid " + player.getName() + " " + formatBalance(salary)
+            System.out.println("[CivicCore] Paid " + player.getName() + " " + formatBalance(salary)
                     + "; new balance " + formatBalance(newBalance));
         }
     }
@@ -2077,12 +2187,19 @@ public final class RisingWorldStarter extends Plugin implements Listener {
     }
 
     private static void debug(String message) {
-        System.out.println("[RisingWorldStarter/DEBUG] " + message);
+        System.out.println("[CivicCore/DEBUG] " + message);
     }
 
     @EventMethod
     public void onStoreClick(PlayerUIElementClickEvent event) {
         Player player = event.getPlayer();
+        AboutView aboutView = aboutViews.get(player.getUID());
+        if (aboutView != null) {
+            if (event.getUIElement().getID() == aboutView.closeButton().getID()) {
+                closeAbout(player);
+            }
+            return;
+        }
         AppearanceView appearanceView = appearanceViews.get(player.getUID());
         if (appearanceView != null) {
             handleAppearanceClick(player, appearanceView, event.getUIElement().getID());
@@ -2267,6 +2384,9 @@ public final class RisingWorldStarter extends Plugin implements Listener {
                              UILabel summary, UILabel adminOverrideButton, UIScrollView playerList,
                              Map<Integer, String> kickTargetsByButtonId,
                              Map<Integer, String> banTargetsByButtonId) {
+    }
+
+    private record AboutView(UIElement window, UILabel closeButton) {
     }
 
     private record CharacterSelectionView(UIElement window,
