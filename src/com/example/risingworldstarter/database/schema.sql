@@ -53,3 +53,22 @@ CREATE TABLE IF NOT EXISTS characters (
     clothes BLOB,
     UNIQUE (account_uid, slot)
 );
+
+CREATE TABLE IF NOT EXISTS groups (
+    group_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE
+);
+
+CREATE TABLE IF NOT EXISTS group_members (
+    character_key TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL REFERENCES groups (group_id) ON DELETE CASCADE,
+    character_name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('OWNER', 'MANAGER', 'MEMBER'))
+);
+
+CREATE INDEX IF NOT EXISTS group_members_group_idx ON group_members (group_id);
+
+CREATE TABLE IF NOT EXISTS group_invitations (
+    character_key TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL REFERENCES groups (group_id) ON DELETE CASCADE
+);

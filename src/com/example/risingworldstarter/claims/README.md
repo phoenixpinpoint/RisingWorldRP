@@ -19,14 +19,16 @@ database. Other plugins can access claims through `CivicCore.getClaimService()`.
 
 - `/claim` claims the current chunk.
 - `/chunk` reports and visualizes the current chunk and owner.
-- `/claims` lists and visualizes all chunks owned by the active character.
+- `/claims` lists personal claims and toggles a 21-by-21 chunk ownership overview
+  centered on the active character's current chunk.
 - `/unclaim` releases the current chunk.
 - `/claimadmin add <online-player>` adds a claim administrator.
 - `/claimadmin remove <online-player>` removes a claim administrator.
 - `/claimadmin list` lists claim administrators.
 
-Claim boundaries are green when unclaimed, blue when owned by the viewing
-character, and red when owned by another character.
+In the `/claims` overview, boundaries are green when available, blue when owned
+by the viewing character, orange when owned by that character's clan, and red
+when unavailable. The overview uses one bounded database query when opened.
 
 ## Protection rules
 
