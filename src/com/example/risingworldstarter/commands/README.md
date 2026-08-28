@@ -3,7 +3,7 @@
 This package provides CivicCore's shared command registry. CivicCore registers
 all of its own chat commands here, and other Rising World plugins can use the
 same registry to add commands and actions. Every registered command is
-automatically included in `/help`.
+automatically included in `/help` and the categorized `/commands` dialog.
 
 ## Public API
 
@@ -28,6 +28,7 @@ CommandRegistry commands = civicCore.getCommandRegistry();
 commands.register(
         "MyPlugin",
         "/greet",
+        "Social",
         "/greet [player]",
         "Greet a player.",
         false,
@@ -40,11 +41,15 @@ The registration arguments are:
 
 1. The owning plugin name.
 2. The primary command name.
-3. The usage text displayed by `/help`.
-4. The help description.
-5. Whether CivicCore must have an active character for the player.
-6. A list of aliases.
-7. The action to execute.
+3. The category displayed by `/commands`.
+4. The usage text displayed by `/help` and `/commands`.
+5. The help description.
+6. Whether CivicCore must have an active character for the player.
+7. A list of aliases.
+8. The action to execute.
+
+The older overload without a category remains supported and places the command
+in the `Other` category.
 
 The action receives the invoked command or alias at `arguments[0]`, followed by
 the entered arguments. CivicCore cancels the original chat-command event before

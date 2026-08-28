@@ -1,4 +1,4 @@
-package com.example.risingworldstarter;
+package com.example.risingworldstarter.economy;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -11,11 +11,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 
-final class FileEconomyService implements EconomyApi {
+public final class FileEconomyService implements EconomyApi {
     private final Path dataFile;
     private final Map<String, Long> balances = new HashMap<>();
 
-    FileEconomyService(Path dataFile) {
+    public FileEconomyService(Path dataFile) {
         this.dataFile = Objects.requireNonNull(dataFile, "dataFile");
         load();
     }

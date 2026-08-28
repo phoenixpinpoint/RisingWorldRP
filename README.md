@@ -1,4 +1,4 @@
-# CivicCore
+﻿# CivicCore
 
 This is a minimal Java project for the **Rising World Unity-version Plugin API**.
 It compiles against the SDK included with your copy of Rising World, so its API matches your game installation.
@@ -75,6 +75,9 @@ Use `/about` in chat to display the plugin name, installed version, basic featur
 summary, author, and license. This command is available even before selecting a
 character.
 
+Use `/commands` to open the categorized command browser, or `/help` to print the
+same registered commands in chat.
+
 Server administrators can use `/admin` to open an in-game dashboard showing
 world time, player counts, claim totals, economy settings, enabled marketplace
 products, and the connected-player balance list. The dashboard includes Refresh
@@ -84,41 +87,9 @@ administrator cannot kick or ban their own session from the dashboard.
 
 ## Economy API
 
-Players see their current balance on the HUD after spawning. They can also use
-`/balance` or `/bal` in chat to print the balance and refresh the HUD.
-
-The top-center HUD shows the current in-world year, month, day, and 24-hour
-clock. It follows the server's world calendar and refreshes once per second.
-
-Balances are stored as integer minor units (cents) in
-`Worlds/<world>/CivicCore/balances.properties`. New players start with
-`$25,000.00`, and claiming a chunk costs `$10,000.00`.
-
-These values can be changed in `config/economy.properties` before explicitly
-loading the configuration, or in the generated runtime `economy.properties`:
-
-```properties
-default-balance=25000.00
-claim-cost=10000.00
-base-salary=1000.00
-```
-
-Every connected player receives the base salary every eight in-world hours, at
-00:00, 08:00, and 16:00. Payday detects entry into a new eight-hour period rather
-than requiring an exact clock tick. It also checks again after Rising World
-skips the night, so sleeping through midnight cannot miss payday.
-Other plugins can access the API through the loaded plugin instance:
-
-```java
-CivicCore economyPlugin =
-        (CivicCore) getPluginByName("CivicCore");
-EconomyApi economy = economyPlugin.getEconomyApi();
-String characterKey = economyPlugin.getActiveCharacterKey(player);
-
-economy.deposit(characterKey, 500);       // adds $5.00
-boolean paid = economy.withdraw(characterKey, 250);
-economyPlugin.updateBalanceLabel(player);    // refresh connected player's HUD
-```
+Players receive character-scoped balances, HUD updates, configurable salaries,
+and a public API for integrations. See the [economy module documentation](src/com/example/risingworldstarter/economy/README.md)
+for configuration, persistence, payday behavior, and API examples.
 
 ## Characters
 
@@ -201,63 +172,16 @@ the plugin imports it once and writes the equivalent JSON file.
 
 ## Land claims
 
-Land ownership is stored by horizontal chunk in
-`Worlds/<world>/CivicCore/claims.properties`. Available chat commands:
-
-- `/claim` claims the chunk where you are standing.
-- `/chunk` reports the current chunk coordinates and owner, and draws its boundary.
-- `/claims` lists all chunks you own and toggles blue squares over all of them.
-- `/unclaim` releases your current chunk.
-- Running `/chunk` again while viewing the same chunk hides its boundary.
-
-The boundary is green for unclaimed land, blue for your land, and red for land
-claimed by another player. Running `/chunk` again moves the visualization to the
-new current chunk. Claim-square X/Z positions remain fixed while their vertical
-position follows the viewing player.
-
-Server administrators can manage a persistent claim-administrator whitelist:
-
-- `/claimadmin add <online-player>`
-- `/claimadmin remove <online-player>`
-- `/claimadmin list`
-
-Whitelisted claim administrators can use `/unclaim` on anyone's chunk. The list
-is stored by player UID in the world-scoped `claim-admins.properties`.
-
-Claimed chunks are protected from other characters. Non-owners cannot build,
-place blueprints or items, edit terrain/water/grass, harvest vegetation, or
-damage, remove, recolor, or change constructions and objects in the chunk.
-Server administrators and whitelisted claim administrators bypass protection.
-On unclaimed chunks, players may gather natural resources such as grass, trees,
-and wild plants, but cannot place items, build, plant, or modify terrain, water,
-or grass. A character must claim the chunk before developing the land.
-Cancelled grass cutting also suppresses the associated harvested grass reward.
-Cancelled planting refunds the seed consumed by Rising World's placement action.
-
-Chunk owners always retain access to their own claimed chunks. The `/admin`
-dashboard has one session-only `ADMIN BYPASS` toggle that lets server and claim
-administrators work inside other characters' claims. It resets to disabled
-whenever the plugin or server reloads.
-
-### Chest ownership
-
-Storage objects placed inside a claimed chunk belong to that chunk's character
-owner and begin unlocked. Existing chests inherit the current chunk owner the
-first time they are accessed or managed. While looking directly at a chest, its
-owner can use:
-
-- `/chest status`
-- `/chest lock`
-- `/chest unlock`
-
-Unlocked chests may be opened by anyone. Locked chests can only be opened or
-managed by their owning character. When the session-only `ADMIN BYPASS` is on,
-server and claim administrators can also open and manage them. Chest ownership
-and lock state are stored in the world's `chests.properties` file and removed
-when the chest is destroyed.
+CivicCore provides character-owned chunks, protection rules, claim administrators,
+and persistent chest ownership. See the [claims module documentation](src/com/example/risingworldstarter/claims/README.md)
+for commands, storage, protection behavior, and the public service API.
 
 ## Subsystem documentation
 
+- [Economy](src/com/example/risingworldstarter/economy/README.md) covers balances,
+  configuration, payroll, persistence, and the public economy API.
+- [Land claims](src/com/example/risingworldstarter/claims/README.md) covers chunk
+  ownership, protection, claim administrators, chests, and integrations.
 - [Command system](src/com/example/risingworldstarter/commands/README.md) explains
   command registration, actions, aliases, `/help`, and external-plugin cleanup.
 - [Automatic window trim](src/com/example/risingworldstarter/autotrim/README.md)
@@ -295,3 +219,4 @@ gradlew and gradlew.bat            Gradle wrapper launchers
 Your main class must extend `net.risingworld.api.Plugin` and implement `onEnable()` and `onDisable()`. Its full package/class name must exactly match `main:` in `resources/plugin.yml`. The build packages this definition as `resources/plugin.yml` inside the JAR, as required by Rising World.
 
 For the current API reference, open <https://javadoc.rising-world.net/>. The official setup guide says the game ships the SDK under `Data/SDK` and its JDK under `Data/Java/JDK`.
+

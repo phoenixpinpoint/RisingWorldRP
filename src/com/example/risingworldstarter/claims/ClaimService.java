@@ -1,4 +1,4 @@
-package com.example.risingworldstarter;
+package com.example.risingworldstarter.claims;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -15,20 +15,20 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
 
-final class ClaimService {
+public final class ClaimService {
     private final Path dataFile;
     private final Map<String, Claim> claims = new HashMap<>();
 
-    ClaimService(Path dataFile) {
+    public ClaimService(Path dataFile) {
         this.dataFile = Objects.requireNonNull(dataFile, "dataFile");
         load();
     }
 
-    synchronized Optional<Claim> getClaim(int chunkX, int chunkZ) {
+    public synchronized Optional<Claim> getClaim(int chunkX, int chunkZ) {
         return Optional.ofNullable(claims.get(key(chunkX, chunkZ)));
     }
 
-    synchronized List<ClaimedChunk> getClaimsByOwner(String ownerUid) {
+    public synchronized List<ClaimedChunk> getClaimsByOwner(String ownerUid) {
         return claims.entrySet().stream()
                 .filter(entry -> entry.getValue().ownerUid().equals(ownerUid))
                 .map(entry -> {
@@ -42,11 +42,11 @@ final class ClaimService {
                 .toList();
     }
 
-    synchronized int getClaimCount() {
+    public synchronized int getClaimCount() {
         return claims.size();
     }
 
-    synchronized int deleteClaimsByOwner(String ownerUid) {
+    public synchronized int deleteClaimsByOwner(String ownerUid) {
         int oldSize = claims.size();
         claims.entrySet().removeIf(entry -> entry.getValue().ownerUid().equals(ownerUid));
         int removed = oldSize - claims.size();
@@ -54,7 +54,7 @@ final class ClaimService {
         return removed;
     }
 
-    synchronized void migrateOwner(String oldOwnerUid, String newOwnerUid, String newOwnerName) {
+    public synchronized void migrateOwner(String oldOwnerUid, String newOwnerUid, String newOwnerName) {
         boolean changed = false;
         for (Map.Entry<String, Claim> entry : claims.entrySet()) {
             if (entry.getValue().ownerUid().equals(oldOwnerUid)) {
@@ -65,7 +65,7 @@ final class ClaimService {
         if (changed) save();
     }
 
-    synchronized boolean claim(int chunkX, int chunkZ, String ownerUid, String ownerName) {
+    public synchronized boolean claim(int chunkX, int chunkZ, String ownerUid, String ownerName) {
         String key = key(chunkX, chunkZ);
         if (claims.containsKey(key)) {
             return false;
@@ -75,7 +75,7 @@ final class ClaimService {
         return true;
     }
 
-    synchronized boolean unclaim(int chunkX, int chunkZ, String ownerUid) {
+    public synchronized boolean unclaim(int chunkX, int chunkZ, String ownerUid) {
         String key = key(chunkX, chunkZ);
         Claim existing = claims.get(key);
         if (existing == null || !existing.ownerUid().equals(ownerUid)) {
@@ -86,7 +86,7 @@ final class ClaimService {
         return true;
     }
 
-    synchronized boolean forceUnclaim(int chunkX, int chunkZ) {
+    public synchronized boolean forceUnclaim(int chunkX, int chunkZ) {
         if (claims.remove(key(chunkX, chunkZ)) == null) {
             return false;
         }

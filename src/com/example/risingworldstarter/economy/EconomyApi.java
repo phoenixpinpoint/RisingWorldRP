@@ -1,4 +1,4 @@
-package com.example.risingworldstarter;
+package com.example.risingworldstarter.economy;
 
 /**
  * Public contract other plugins can use to interact with player balances.

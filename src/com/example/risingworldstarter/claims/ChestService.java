@@ -1,4 +1,4 @@
-package com.example.risingworldstarter;
+package com.example.risingworldstarter.claims;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -13,20 +13,20 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 
-final class ChestService {
+public final class ChestService {
     private final Path dataFile;
     private final Map<String, ChestOwnership> chests = new HashMap<>();
 
-    ChestService(Path dataFile) {
+    public ChestService(Path dataFile) {
         this.dataFile = dataFile;
         load();
     }
 
-    synchronized Optional<ChestOwnership> get(long globalId, int chunkX, int chunkY, int chunkZ) {
+    public synchronized Optional<ChestOwnership> get(long globalId, int chunkX, int chunkY, int chunkZ) {
         return Optional.ofNullable(chests.get(key(globalId, chunkX, chunkY, chunkZ)));
     }
 
-    synchronized ChestOwnership assign(long globalId, int chunkX, int chunkY, int chunkZ,
+    public synchronized ChestOwnership assign(long globalId, int chunkX, int chunkY, int chunkZ,
                                        String ownerUid, String ownerName) {
         String key = key(globalId, chunkX, chunkY, chunkZ);
         ChestOwnership existing = chests.get(key);
@@ -37,7 +37,7 @@ final class ChestService {
         return created;
     }
 
-    synchronized ChestOwnership setLocked(long globalId, int chunkX, int chunkY, int chunkZ,
+    public synchronized ChestOwnership setLocked(long globalId, int chunkX, int chunkY, int chunkZ,
                                           ChestOwnership ownership, boolean locked) {
         ChestOwnership updated = new ChestOwnership(ownership.ownerUid(), ownership.ownerName(), locked);
         chests.put(key(globalId, chunkX, chunkY, chunkZ), updated);
@@ -45,7 +45,7 @@ final class ChestService {
         return updated;
     }
 
-    synchronized void remove(long globalId, int chunkX, int chunkY, int chunkZ) {
+    public synchronized void remove(long globalId, int chunkX, int chunkY, int chunkZ) {
         if (chests.remove(key(globalId, chunkX, chunkY, chunkZ)) != null) save();
     }
 

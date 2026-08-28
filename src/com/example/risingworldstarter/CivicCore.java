@@ -1,9 +1,18 @@
 package com.example.risingworldstarter;
 
 import com.example.risingworldstarter.autotrim.WindowTrimService;
+import com.example.risingworldstarter.claims.ChestOwnership;
+import com.example.risingworldstarter.claims.ChestService;
+import com.example.risingworldstarter.claims.Claim;
+import com.example.risingworldstarter.claims.ClaimAdminService;
+import com.example.risingworldstarter.claims.ClaimedChunk;
+import com.example.risingworldstarter.claims.ClaimService;
 import com.example.risingworldstarter.commands.CommandAction;
 import com.example.risingworldstarter.commands.CommandRegistry;
 import com.example.risingworldstarter.commands.RegisteredCommand;
+import com.example.risingworldstarter.economy.EconomyApi;
+import com.example.risingworldstarter.economy.EconomySettings;
+import com.example.risingworldstarter.economy.FileEconomyService;
 import net.risingworld.api.Plugin;
 import net.risingworld.api.Server;
 import net.risingworld.api.Timer;
@@ -55,6 +64,7 @@ import java.text.NumberFormat;
 import java.util.Locale;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
@@ -90,6 +100,7 @@ public final class CivicCore extends Plugin implements Listener {
     private final Map<String, StoreView> storeViews = new ConcurrentHashMap<>();
     private final Map<String, AdminView> adminViews = new ConcurrentHashMap<>();
     private final Map<String, AboutView> aboutViews = new ConcurrentHashMap<>();
+    private final Map<String, CommandListView> commandListViews = new ConcurrentHashMap<>();
     private final Map<String, CharacterService.CharacterSummary> activeCharacters = new ConcurrentHashMap<>();
     private final Map<String, String> activeClaimIdentities = new ConcurrentHashMap<>();
     private final Map<String, CharacterSelectionView> characterSelectionViews = new ConcurrentHashMap<>();
@@ -311,6 +322,7 @@ public final class CivicCore extends Plugin implements Listener {
         storeViews.clear();
         adminViews.clear();
         aboutViews.clear();
+        commandListViews.clear();
         activeCharacters.clear();
         activeClaimIdentities.clear();
         characterSelectionViews.clear();
@@ -333,6 +345,14 @@ public final class CivicCore extends Plugin implements Listener {
             throw new IllegalStateException("Economy is not available before the plugin is enabled");
         }
         return economy;
+    }
+
+    /** Returns the world-scoped land-claim service for integrations with other plugins. */
+    public ClaimService getClaimService() {
+        if (claims == null) {
+            throw new IllegalStateException("Claims are not available before the plugin is enabled");
+        }
+        return claims;
     }
 
     /** Returns the shared registry so other plugins can register commands and actions. */
@@ -400,6 +420,7 @@ public final class CivicCore extends Plugin implements Listener {
         storeViews.remove(event.getPlayer().getUID());
         adminViews.remove(event.getPlayer().getUID());
         aboutViews.remove(event.getPlayer().getUID());
+        commandListViews.remove(event.getPlayer().getUID());
         characterSelectionViews.remove(event.getPlayer().getUID());
         appearanceViews.remove(event.getPlayer().getUID());
         claimProtectionNotices.remove(event.getPlayer().getUID());
@@ -739,42 +760,44 @@ public final class CivicCore extends Plugin implements Listener {
 
     private void registerCommands() {
         commandRegistry.unregisterOwner("CivicCore");
-        registerCommand("/help", "Show available CivicCore commands.", false, List.of(),
+        registerCommand("General", "/help", "Show available CivicCore commands in chat.", false, List.of(),
                 (player, parts) -> showHelp(player));
-        registerCommand("/about", "Show CivicCore information and version.", false, List.of(),
+        registerCommand("General", "/commands", "Open the categorized command list.", false, List.of(),
+                (player, parts) -> showCommands(player));
+        registerCommand("General", "/about", "Show CivicCore information and version.", false, List.of(),
                 (player, parts) -> showAbout(player));
-        registerCommand("/characters", "Open the character selector.", true,
+        registerCommand("Character", "/characters", "Open the character selector.", true,
                 List.of("/character", "/chars"), (player, parts) -> openCharacterSwitcher(player));
-        registerCommand("/syncappearance", "Copy your current profile appearance.", true, List.of(),
+        registerCommand("Character", "/syncappearance", "Copy your current profile appearance.", true, List.of(),
                 (player, parts) -> syncProfileAppearance(player));
-        registerCommand("/balance", "Show your current cash balance.", true, List.of("/bal"),
+        registerCommand("Economy", "/balance", "Show your current cash balance.", true, List.of("/bal"),
                 (player, parts) -> {
                     String formattedBalance = formatBalance(economy.getBalance(characterKey(player)));
                     player.sendTextMessage("<color=#E8C547>Cash:</color> " + formattedBalance);
                     updateBalanceLabel(player);
                 });
-        registerCommand("/store", "Open or close the marketplace.", true, List.of(),
+        registerCommand("Marketplace", "/store", "Open or close the marketplace.", true, List.of(),
                 (player, parts) -> toggleStore(player));
-        registerCommand("/admin", "Open the administrator dashboard.", true, List.of(),
+        registerCommand("Administration", "/admin", "Open the administrator dashboard.", true, List.of(),
                 (player, parts) -> toggleAdminDashboard(player));
-        registerCommand("/claim", "Claim your current chunk.", true, List.of(),
+        registerCommand("Land Claims", "/claim", "Claim your current chunk.", true, List.of(),
                 (player, parts) -> claimCurrentChunk(player));
-        registerCommand("/unclaim", "Release your current chunk.", true, List.of(),
+        registerCommand("Land Claims", "/unclaim", "Release your current chunk.", true, List.of(),
                 (player, parts) -> unclaimCurrentChunk(player));
-        registerCommand("/chunk", "Show the current chunk and its owner.", true, List.of(),
+        registerCommand("Land Claims", "/chunk", "Show the current chunk and its owner.", true, List.of(),
                 (player, parts) -> showCurrentChunk(player, true));
-        registerCommand("/claims", "List and toggle your claimed chunks.", true, List.of(),
+        registerCommand("Land Claims", "/claims", "List and toggle your claimed chunks.", true, List.of(),
                 (player, parts) -> listOwnedChunks(player));
-        registerCommand("/claimadmin <add|remove|list> [player]", "Manage claim administrators.", true,
+        registerCommand("Land Claims", "/claimadmin <add|remove|list> [player]", "Manage claim administrators.", true,
                 List.of(), this::handleClaimAdminCommand);
-        registerCommand("/chest <lock|unlock|status>", "Manage the chest you are looking at.", true,
+        registerCommand("Storage", "/chest <lock|unlock|status>", "Manage the chest you are looking at.", true,
                 List.of(), this::handleChestCommand);
     }
 
-    private void registerCommand(String usage, String description, boolean requiresCharacter,
+    private void registerCommand(String category, String usage, String description, boolean requiresCharacter,
                                  List<String> aliases, CommandAction action) {
         String primaryName = usage.split("\\s+", 2)[0];
-        commandRegistry.register("CivicCore", primaryName, usage, description,
+        commandRegistry.register("CivicCore", primaryName, category, usage, description,
                 requiresCharacter, aliases, action);
     }
 
@@ -786,6 +809,106 @@ public final class CivicCore extends Plugin implements Listener {
                     : " <color=#888888>(aliases: " + String.join(", ", command.aliases()) + ")</color>";
             player.sendTextMessage("<color=#77AAFF>" + command.usage() + "</color>" + aliases
                     + " - " + command.description());
+        }
+    }
+
+    private void showCommands(Player player) {
+        CommandListView previous = commandListViews.remove(player.getUID());
+        if (previous != null) player.removeUIElement(previous.window());
+
+        UIElement window = new UIElement();
+        window.setPosition(50f, 50f, true);
+        window.setPivot(Pivot.MiddleCenter);
+        window.setSize(800f, 620f, false);
+        window.setBackgroundColor((int) 0x161B22F8L);
+        window.setBorder(2f);
+        window.setBorderColor((int) 0xE8C547FFL);
+        window.setBorderEdgeRadius(8f, false);
+
+        UILabel title = new UILabel("CivicCore Commands");
+        title.setPosition(24f, 14f, false);
+        title.setSize(680f, 42f, false);
+        title.setFontSize(28f);
+        title.setFontColor((int) 0xF4E3A1FFL);
+        title.setTextAlign(TextAnchor.MiddleLeft);
+        window.addChild(title);
+
+        UILabel closeButton = new UILabel("X");
+        closeButton.setPosition(744f, 14f, false);
+        closeButton.setSize(36f, 36f, false);
+        closeButton.setFontSize(22f);
+        closeButton.setTextAlign(TextAnchor.MiddleCenter);
+        closeButton.setBackgroundColor((int) 0x8B2D2DFFL);
+        closeButton.setClickable(true);
+        window.addChild(closeButton);
+
+        UIScrollView commandList = new UIScrollView(UIScrollView.ScrollViewMode.Vertical);
+        commandList.setPosition(20f, 66f, false);
+        commandList.setSize(760f, 530f, false);
+        commandList.setVerticalScrollerVisibility(UIScrollView.ScrollerVisibility.Auto);
+        commandList.setHorizontalScrollerVisibility(UIScrollView.ScrollerVisibility.Hidden);
+        commandList.setMouseWheelScrollSize(48f);
+        window.addChild(commandList);
+
+        Map<String, List<RegisteredCommand>> commandsByCategory = new LinkedHashMap<>();
+        for (RegisteredCommand command : commandRegistry.getCommands()) {
+            commandsByCategory.computeIfAbsent(command.category(), ignored -> new ArrayList<>()).add(command);
+        }
+
+        float y = 0f;
+        for (Map.Entry<String, List<RegisteredCommand>> category : commandsByCategory.entrySet()) {
+            UILabel categoryLabel = new UILabel(category.getKey());
+            categoryLabel.setPosition(8f, y, false);
+            categoryLabel.setSize(720f, 34f, false);
+            categoryLabel.setFontSize(20f);
+            categoryLabel.setFontColor((int) 0xE8C547FFL);
+            categoryLabel.setTextAlign(TextAnchor.MiddleLeft);
+            categoryLabel.setBackgroundColor((int) 0x28313CFFL);
+            commandList.addChild(categoryLabel);
+            y += 38f;
+
+            for (RegisteredCommand command : category.getValue()) {
+                String commandText = command.usage();
+                if (!command.aliases().isEmpty()) {
+                    commandText += "  (" + String.join(", ", command.aliases()) + ")";
+                }
+                UILabel usage = new UILabel(commandText);
+                usage.setPosition(18f, y, false);
+                usage.setSize(350f, 38f, false);
+                usage.setFontSize(15f);
+                usage.setFontColor((int) 0x77AAFFFFL);
+                usage.setTextAlign(TextAnchor.MiddleLeft);
+                commandList.addChild(usage);
+
+                UILabel description = new UILabel(command.description());
+                description.setPosition(376f, y, false);
+                description.setSize(350f, 38f, false);
+                description.setFontSize(15f);
+                description.setFontColor((int) 0xDDDDDDFFL);
+                description.setTextAlign(TextAnchor.MiddleLeft);
+                commandList.addChild(description);
+                y += 42f;
+            }
+            y += 8f;
+        }
+
+        commandListViews.put(player.getUID(), new CommandListView(window, closeButton));
+        player.addUIElement(window);
+        player.stopInput(true, true);
+        player.setMouseCursorVisible(true);
+    }
+
+    private void closeCommands(Player player) {
+        CommandListView view = commandListViews.remove(player.getUID());
+        if (view != null) player.removeUIElement(view.window());
+        boolean anotherDialogOpen = aboutViews.containsKey(player.getUID())
+                || characterSelectionViews.containsKey(player.getUID())
+                || appearanceViews.containsKey(player.getUID())
+                || adminViews.containsKey(player.getUID())
+                || storeViews.containsKey(player.getUID());
+        if (!anotherDialogOpen) {
+            player.stopInput(false, false);
+            player.setMouseCursorVisible(false);
         }
     }
 
@@ -871,7 +994,8 @@ public final class CivicCore extends Plugin implements Listener {
         boolean anotherDialogOpen = characterSelectionViews.containsKey(player.getUID())
                 || appearanceViews.containsKey(player.getUID())
                 || adminViews.containsKey(player.getUID())
-                || storeViews.containsKey(player.getUID());
+                || storeViews.containsKey(player.getUID())
+                || commandListViews.containsKey(player.getUID());
         if (!anotherDialogOpen) {
             player.stopInput(false, false);
             player.setMouseCursorVisible(false);
@@ -2217,6 +2341,13 @@ public final class CivicCore extends Plugin implements Listener {
     @EventMethod
     public void onStoreClick(PlayerUIElementClickEvent event) {
         Player player = event.getPlayer();
+        CommandListView commandListView = commandListViews.get(player.getUID());
+        if (commandListView != null) {
+            if (event.getUIElement().getID() == commandListView.closeButton().getID()) {
+                closeCommands(player);
+            }
+            return;
+        }
         AboutView aboutView = aboutViews.get(player.getUID());
         if (aboutView != null) {
             if (event.getUIElement().getID() == aboutView.closeButton().getID()) {
@@ -2411,6 +2542,9 @@ public final class CivicCore extends Plugin implements Listener {
     }
 
     private record AboutView(UIElement window, UILabel closeButton) {
+    }
+
+    private record CommandListView(UIElement window, UILabel closeButton) {
     }
 
     private record CharacterSelectionView(UIElement window,

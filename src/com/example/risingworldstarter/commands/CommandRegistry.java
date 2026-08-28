@@ -15,8 +15,16 @@ public final class CommandRegistry {
     public synchronized RegisteredCommand register(String owner, String name, String usage,
                                                     String description, boolean requiresCharacter,
                                                     List<String> aliases, CommandAction action) {
+        return register(owner, name, "Other", usage, description, requiresCharacter, aliases, action);
+    }
+
+    public synchronized RegisteredCommand register(String owner, String name, String category,
+                                                    String usage, String description,
+                                                    boolean requiresCharacter, List<String> aliases,
+                                                    CommandAction action) {
         String normalizedOwner = requireText(owner, "owner");
         String normalizedName = normalizeName(name);
+        String normalizedCategory = requireText(category, "category");
         String normalizedUsage = requireText(usage, "usage");
         String normalizedDescription = requireText(description, "description");
         Objects.requireNonNull(aliases, "aliases");
@@ -34,7 +42,7 @@ public final class CommandRegistry {
             }
         }
 
-        RegisteredCommand command = new RegisteredCommand(normalizedOwner, normalizedName,
+        RegisteredCommand command = new RegisteredCommand(normalizedOwner, normalizedName, normalizedCategory,
                 normalizedUsage, normalizedDescription, requiresCharacter, normalizedAliases, action);
         commands.add(command);
         for (String registeredName : allNames) commandsByName.put(registeredName, command);
