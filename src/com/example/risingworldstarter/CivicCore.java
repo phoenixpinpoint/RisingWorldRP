@@ -8,6 +8,7 @@ import com.example.risingworldstarter.claims.ClaimAdminService;
 import com.example.risingworldstarter.claims.ClaimedChunk;
 import com.example.risingworldstarter.claims.ClaimService;
 import com.example.risingworldstarter.commands.CommandAction;
+import com.example.risingworldstarter.commands.CommandHelp;
 import com.example.risingworldstarter.commands.CommandRegistry;
 import com.example.risingworldstarter.commands.RegisteredCommand;
 import com.example.risingworldstarter.database.Database;
@@ -15,6 +16,10 @@ import com.example.risingworldstarter.database.SqliteDatabase;
 import com.example.risingworldstarter.economy.DatabaseEconomyService;
 import com.example.risingworldstarter.economy.EconomyApi;
 import com.example.risingworldstarter.economy.EconomySettings;
+import com.example.risingworldstarter.groups.Group;
+import com.example.risingworldstarter.groups.GroupMember;
+import com.example.risingworldstarter.groups.GroupRole;
+import com.example.risingworldstarter.groups.GroupService;
 import net.risingworld.api.Plugin;
 import net.risingworld.api.Server;
 import net.risingworld.api.Timer;
@@ -121,6 +126,7 @@ public final class CivicCore extends Plugin implements Listener {
     private ClaimService claims;
     private ClaimAdminService claimAdmins;
     private ChestService chests;
+    private GroupService groups;
     private EconomySettings economySettings;
     private StoreCatalog storeCatalog;
     private Path marketplaceConfigPath;
@@ -157,7 +163,9 @@ public final class CivicCore extends Plugin implements Listener {
         claims = new ClaimService(database);
         claimAdmins = new ClaimAdminService(database);
         chests = new ChestService(database);
+        groups = new GroupService(database);
         characterService = new CharacterService(database);
+        groups.migrateLegacy(worldDataPath.resolve("groups.properties"));
         if (LegacyStateMigrator.migrate(database, worldDataPath, databaseEconomy,
                 claims, claimAdmins, chests, characterService)) {
             debug("Migrated legacy mutable state into civiccore.db; original files retained as backups");
@@ -228,6 +236,10 @@ public final class CivicCore extends Plugin implements Listener {
                     worldDataPath.resolve("marketplace.json"));
             copyLegacyFile(olderWorldDataPath.resolve("marketplace.json"),
                     worldDataPath.resolve("marketplace.json"));
+            copyLegacyFile(previousWorldDataPath.resolve("groups.properties"),
+                    worldDataPath.resolve("groups.properties"));
+            copyLegacyFile(olderWorldDataPath.resolve("groups.properties"),
+                    worldDataPath.resolve("groups.properties"));
             copyLegacyFile(pluginPath.resolve("economy.properties"),
                     worldDataPath.resolve("economy.properties"));
             copyLegacyFile(pluginPath.resolve("marketplace.json"),
@@ -238,16 +250,19 @@ public final class CivicCore extends Plugin implements Listener {
                         || Files.exists(previousWorldDataPath.resolve("claims.properties"))
                         || Files.exists(previousWorldDataPath.resolve("claim-admins.properties"))
                         || Files.exists(previousWorldDataPath.resolve("chests.properties"))
+                        || Files.exists(previousWorldDataPath.resolve("groups.properties"))
                         || Files.isDirectory(previousWorldDataPath.resolve("characters"));
                 boolean hasOlderWorldData = Files.exists(olderWorldDataPath.resolve("balances.properties"))
                         || Files.exists(olderWorldDataPath.resolve("claims.properties"))
                         || Files.exists(olderWorldDataPath.resolve("claim-admins.properties"))
                         || Files.exists(olderWorldDataPath.resolve("chests.properties"))
+                        || Files.exists(olderWorldDataPath.resolve("groups.properties"))
                         || Files.isDirectory(olderWorldDataPath.resolve("characters"));
                 boolean hasFilesInWorldRoot = Files.exists(worldFolder.resolve("balances.properties"))
                         || Files.exists(worldFolder.resolve("claims.properties"))
                         || Files.exists(worldFolder.resolve("claim-admins.properties"))
                         || Files.exists(worldFolder.resolve("chests.properties"))
+                        || Files.exists(worldFolder.resolve("groups.properties"))
                         || Files.isDirectory(worldFolder.resolve("characters"));
                 Path legacySource = hasPreviousWorldData ? previousWorldDataPath
                         : hasOlderWorldData ? olderWorldDataPath
@@ -264,6 +279,8 @@ public final class CivicCore extends Plugin implements Listener {
                         worldDataPath.resolve("claim-admins.properties"));
                     copyLegacyFile(legacySource.resolve("chests.properties"),
                         worldDataPath.resolve("chests.properties"));
+                    copyLegacyFile(legacySource.resolve("groups.properties"),
+                        worldDataPath.resolve("groups.properties"));
                     copyLegacyDirectory(legacySource.resolve("characters"),
                         worldDataPath.resolve("characters"));
                     if (!hasPreviousWorldData && !hasFilesInWorldRoot) {
@@ -363,6 +380,12 @@ public final class CivicCore extends Plugin implements Listener {
             throw new IllegalStateException("Claims are not available before the plugin is enabled");
         }
         return claims;
+    }
+
+    /** Returns the world-scoped clan service for integrations with other plugins. */
+    public GroupService getGroupService() {
+        if (groups == null) throw new IllegalStateException("Clans are not available before the plugin is enabled");
+        return groups;
     }
 
     /** Returns the shared registry so other plugins can register commands and actions. */
@@ -550,7 +573,7 @@ public final class CivicCore extends Plugin implements Listener {
                 event.getChunkPositionY(), event.getChunkPositionZ());
         if (ownership == null || !ownership.locked()) return;
         String identity = activeClaimIdentity(event.getPlayer());
-        if (ownership.ownerUid().equals(identity)
+        if (canAccessOwner(identity, ownership.ownerUid())
                 || (isClaimAdmin(event.getPlayer()) && claimAdminOverrideEnabled)) return;
         event.setCancelled(true);
         event.getPlayer().sendTextMessage("<color=#FF7777>This chest is locked by "
@@ -701,7 +724,7 @@ public final class CivicCore extends Plugin implements Listener {
             return;
         }
         String activeClaimIdentity = activeClaimIdentity(player);
-        boolean isOwner = claim.ownerUid().equals(activeClaimIdentity);
+        boolean isOwner = canAccessOwner(activeClaimIdentity, claim.ownerUid());
         if (isOwner || (isClaimAdmin(player) && claimAdminOverrideEnabled)) return;
 
         event.setCancelled(true);
@@ -755,7 +778,7 @@ public final class CivicCore extends Plugin implements Listener {
 
     @EventMethod
     public void onPlayerCommand(PlayerCommandEvent event) {
-        String[] parts = event.getCommand().trim().split("\\s+", 3);
+        String[] parts = event.getCommand().trim().split("\\s+");
         RegisteredCommand command = commandRegistry.find(parts[0]);
         if (command == null) {
             return;
@@ -802,18 +825,36 @@ public final class CivicCore extends Plugin implements Listener {
                 List.of(), this::handleClaimAdminCommand);
         registerCommand("Storage", "/chest <lock|unlock|status>", "Manage the chest you are looking at.", true,
                 List.of(), this::handleChestCommand);
+        registerCommand("Groups", "/clan", "Show clan command usage.", true, List.of("/group"), List.of(
+                new CommandHelp("/clan create <name>", "Create a new clan."),
+                new CommandHelp("/clan info", "Show clan members, roles, and claims."),
+                new CommandHelp("/clan invite <character>", "Invite an online character."),
+                new CommandHelp("/clan accept", "Accept a pending clan invitation."),
+                new CommandHelp("/clan leave", "Leave your current clan."),
+                new CommandHelp("/clan kick <character>", "Remove a clan member."),
+                new CommandHelp("/clan promote <character>", "Promote a member to manager."),
+                new CommandHelp("/clan demote <character>", "Demote a manager to member."),
+                new CommandHelp("/clan claim", "Purchase the current chunk for the clan."),
+                new CommandHelp("/clan unclaim", "Release the current clan-owned chunk."),
+                new CommandHelp("/clan disband", "Disband the clan and release its claims.")), this::handleClanCommand);
     }
 
     private void registerCommand(String category, String usage, String description, boolean requiresCharacter,
                                  List<String> aliases, CommandAction action) {
+        registerCommand(category, usage, description, requiresCharacter, aliases, List.of(), action);
+    }
+
+    private void registerCommand(String category, String usage, String description, boolean requiresCharacter,
+                                 List<String> aliases, List<CommandHelp> additionalHelp, CommandAction action) {
         String primaryName = usage.split("\\s+", 2)[0];
         commandRegistry.register("CivicCore", primaryName, category, usage, description,
-                requiresCharacter, aliases, action);
+                requiresCharacter, aliases, additionalHelp, action);
     }
 
     private void showHelp(Player player) {
         player.sendTextMessage("<color=#E8C547>--- CivicCore Commands ---</color>");
-        for (RegisteredCommand command : commandRegistry.getCommands()) {
+        for (RegisteredCommand command : commandRegistry.getCommands().stream()
+                .filter(registered -> registered.category().equalsIgnoreCase("General")).toList()) {
             String aliases = command.aliases().isEmpty()
                     ? ""
                     : " <color=#888888>(aliases: " + String.join(", ", command.aliases()) + ")</color>";
@@ -878,26 +919,24 @@ public final class CivicCore extends Plugin implements Listener {
             y += 38f;
 
             for (RegisteredCommand command : category.getValue()) {
-                String commandText = command.usage();
-                if (!command.aliases().isEmpty()) {
-                    commandText += "  (" + String.join(", ", command.aliases()) + ")";
+                List<CommandHelp> rows = new ArrayList<>();
+                rows.add(new CommandHelp(command.usage(), command.description()));
+                rows.addAll(command.additionalHelp());
+                for (int rowIndex = 0; rowIndex < rows.size(); rowIndex++) {
+                    CommandHelp row = rows.get(rowIndex);
+                    String commandText = row.usage();
+                    if (rowIndex == 0 && !command.aliases().isEmpty())
+                        commandText += "  (" + String.join(", ", command.aliases()) + ")";
+                    UILabel usage = new UILabel(commandText);
+                    usage.setPosition(18f, y, false); usage.setSize(350f, 38f, false);
+                    usage.setFontSize(15f); usage.setFontColor((int) 0x77AAFFFFL);
+                    usage.setTextAlign(TextAnchor.MiddleLeft); commandList.addChild(usage);
+                    UILabel description = new UILabel(row.description());
+                    description.setPosition(376f, y, false); description.setSize(350f, 38f, false);
+                    description.setFontSize(15f); description.setFontColor((int) 0xDDDDDDFFL);
+                    description.setTextAlign(TextAnchor.MiddleLeft); commandList.addChild(description);
+                    y += 42f;
                 }
-                UILabel usage = new UILabel(commandText);
-                usage.setPosition(18f, y, false);
-                usage.setSize(350f, 38f, false);
-                usage.setFontSize(15f);
-                usage.setFontColor((int) 0x77AAFFFFL);
-                usage.setTextAlign(TextAnchor.MiddleLeft);
-                commandList.addChild(usage);
-
-                UILabel description = new UILabel(command.description());
-                description.setPosition(376f, y, false);
-                description.setSize(350f, 38f, false);
-                description.setFontSize(15f);
-                description.setFontColor((int) 0xDDDDDDFFL);
-                description.setTextAlign(TextAnchor.MiddleLeft);
-                commandList.addChild(description);
-                y += 42f;
             }
             y += 8f;
         }
@@ -927,7 +966,7 @@ public final class CivicCore extends Plugin implements Listener {
         if (previous != null) player.removeUIElement(previous.window());
 
         String version = getClass().getPackage().getImplementationVersion();
-        if (version == null || version.isBlank()) version = "0.8.2";
+        if (version == null || version.isBlank()) version = "0.8.3";
 
         UIElement window = new UIElement();
         window.setPosition(50f, 50f, true);
@@ -1029,7 +1068,7 @@ public final class CivicCore extends Plugin implements Listener {
                 player.sendTextMessage("<color=#FFAA66>This chest is not inside a claimed chunk.</color>");
                 return;
             }
-            boolean ownsChest = ownership.ownerUid().equals(activeClaimIdentity(player));
+            boolean ownsChest = canAccessOwner(activeClaimIdentity(player), ownership.ownerUid());
             boolean adminCanManage = isClaimAdmin(player) && claimAdminOverrideEnabled;
             if (!ownsChest && !adminCanManage) {
                 player.sendTextMessage("<color=#FF7777>This chest belongs to "
@@ -1047,6 +1086,120 @@ public final class CivicCore extends Plugin implements Listener {
                     object.getChunkPositionZ(), ownership, locked);
             player.sendTextMessage("<color=#77FF99>Chest " + (locked ? "locked" : "unlocked") + ".</color>");
         });
+    }
+
+    private void handleClanCommand(Player player, String[] parts) {
+        if (parts.length < 2) { sendClanUsage(player); return; }
+        String characterKey = characterKey(player);
+        String action = parts[1].toLowerCase(Locale.US);
+        try {
+            switch (action) {
+                case "create" -> {
+                    if (parts.length < 3) throw new IllegalArgumentException("Usage: /clan create <name>");
+                    Group group = groups.create(joinArguments(parts, 2), characterKey, player.getName());
+                    player.sendTextMessage("<color=#77FF99>Created clan " + group.name()
+                            + " and joined as Owner.</color>");
+                }
+                case "info", "members" -> showClanInfo(player, characterKey);
+                case "invite" -> {
+                    Player target = requireOnlineClanTarget(parts, 2);
+                    Group group = groups.findByMember(characterKey)
+                            .orElseThrow(() -> new IllegalStateException("You do not belong to a clan."));
+                    groups.invite(group.id(), characterKey, characterKey(target));
+                    player.sendTextMessage("<color=#77FF99>Invited " + target.getName() + " to " + group.name() + ".</color>");
+                    target.sendTextMessage("<color=#E8C547>" + player.getName() + " invited you to clan "
+                            + group.name() + ". Use /clan accept to join.</color>");
+                }
+                case "accept" -> {
+                    Group group = groups.acceptInvitation(characterKey, player.getName());
+                    player.sendTextMessage("<color=#77FF99>Joined clan " + group.name() + ".</color>");
+                }
+                case "leave" -> { groups.leave(characterKey); player.sendTextMessage("<color=#77FF99>You left your clan.</color>"); }
+                case "kick", "promote", "demote" -> {
+                    Player target = requireOnlineClanTarget(parts, 2);
+                    Group group = groups.findByMember(characterKey)
+                            .orElseThrow(() -> new IllegalStateException("You do not belong to a clan."));
+                    if (action.equals("kick")) groups.kick(group.id(), characterKey, characterKey(target));
+                    else groups.setManager(group.id(), characterKey, characterKey(target), action.equals("promote"));
+                    player.sendTextMessage("<color=#77FF99>Clan membership updated for " + target.getName() + ".</color>");
+                }
+                case "claim" -> claimCurrentChunkForClan(player, characterKey);
+                case "unclaim" -> unclaimCurrentChunkForClan(player, characterKey);
+                case "disband" -> {
+                    Group group = groups.findByMember(characterKey)
+                            .orElseThrow(() -> new IllegalStateException("You do not belong to a clan."));
+                    Group removed = groups.disband(group.id(), characterKey);
+                    int removedClaims = claims.deleteClaimsByOwner(removed.claimOwnerId());
+                    player.sendTextMessage("<color=#77FF99>Disbanded " + removed.name() + " and released "
+                            + removedClaims + " clan claim(s).</color>");
+                }
+                default -> sendClanUsage(player);
+            }
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            player.sendTextMessage("<color=#FF7777>" + exception.getMessage() + "</color>");
+        }
+        player.sendTextMessage("<color=#AAAAAA>Use </color><color=#77AAFF>/commands</color>"
+                + "<color=#AAAAAA> to browse every available command by category.</color>");
+    }
+
+    private void showClanInfo(Player player, String characterKey) {
+        Group group = groups.findByMember(characterKey)
+                .orElseThrow(() -> new IllegalStateException("You do not belong to a clan."));
+        player.sendTextMessage("<color=#E8C547>--- " + group.name() + " ---</color>");
+        for (GroupMember member : group.members().values().stream()
+                .sorted((left, right) -> left.role().compareTo(right.role())).toList()) {
+            player.sendTextMessage("- " + member.name() + " <color=#AAAAAA>[" + formatGroupRole(member.role()) + "]</color>");
+        }
+        player.sendTextMessage("<color=#AAAAAA>Clan claims: "
+                + claims.getClaimsByOwner(group.claimOwnerId()).size() + "</color>");
+    }
+
+    private void claimCurrentChunkForClan(Player player, String characterKey) {
+        Group group = groups.findByMember(characterKey)
+                .orElseThrow(() -> new IllegalStateException("You do not belong to a clan."));
+        if (!groups.canManage(group.id(), characterKey)) throw new IllegalStateException("Only a clan owner or manager can claim land.");
+        Vector3i chunk = player.getChunkPosition();
+        if (claims.getClaim(chunk.x, chunk.z).isPresent()) throw new IllegalStateException("This chunk is already claimed.");
+        if (!economy.withdraw(characterKey, economySettings.claimCost()))
+            throw new IllegalStateException("You need " + formatBalance(economySettings.claimCost()) + " to claim this chunk for the clan.");
+        if (!claims.claim(chunk.x, chunk.z, group.claimOwnerId(), group.name())) {
+            economy.deposit(characterKey, economySettings.claimCost());
+            throw new IllegalStateException("This chunk was claimed before the transaction completed.");
+        }
+        updateBalanceLabel(player);
+        player.sendTextMessage("<color=#77FF99>Claimed chunk " + chunk.x + ", " + chunk.z + " for " + group.name() + ".</color>");
+    }
+
+    private void unclaimCurrentChunkForClan(Player player, String characterKey) {
+        Group group = groups.findByMember(characterKey)
+                .orElseThrow(() -> new IllegalStateException("You do not belong to a clan."));
+        if (!groups.canManage(group.id(), characterKey)) throw new IllegalStateException("Only a clan owner or manager can release clan land.");
+        Vector3i chunk = player.getChunkPosition();
+        if (!claims.unclaim(chunk.x, chunk.z, group.claimOwnerId())) throw new IllegalStateException("This chunk is not owned by your clan.");
+        clearClaimVisuals(player);
+        player.sendTextMessage("<color=#77FF99>Released clan chunk " + chunk.x + ", " + chunk.z + ".</color>");
+    }
+
+    private Player requireOnlineClanTarget(String[] parts, int startIndex) {
+        if (parts.length <= startIndex) throw new IllegalArgumentException("Specify an online character name.");
+        Player target = Server.getPlayerByName(joinArguments(parts, startIndex));
+        if (target == null || !activeCharacters.containsKey(target.getUID()))
+            throw new IllegalArgumentException("That character must be online and active.");
+        return target;
+    }
+
+    private static String joinArguments(String[] parts, int startIndex) {
+        return String.join(" ", java.util.Arrays.copyOfRange(parts, startIndex, parts.length));
+    }
+
+    private static String formatGroupRole(GroupRole role) {
+        String name = role.name().toLowerCase(Locale.US);
+        return Character.toUpperCase(name.charAt(0)) + name.substring(1);
+    }
+
+    private static void sendClanUsage(Player player) {
+        player.sendTextMessage("<color=#E8C547>Clan commands:</color> create, info, invite, accept, leave, "
+                + "kick, promote, demote, claim, unclaim, disband");
     }
 
     private ChestOwnership getOrAssignChest(long globalId, int chunkX, int chunkY, int chunkZ) {
@@ -1149,7 +1302,7 @@ public final class CivicCore extends Plugin implements Listener {
         Vector3i chunk = player.getChunkPosition();
         Claim existing = claims.getClaim(chunk.x, chunk.z).orElse(null);
         if (existing != null) {
-            String owner = existing.ownerUid().equals(characterKey(player)) ? "you" : existing.ownerName();
+            String owner = canAccessOwner(characterKey(player), existing.ownerUid()) ? "you or your clan" : existing.ownerName();
             player.sendTextMessage("<color=#FF7777>Chunk " + chunk.x + ", " + chunk.z
                     + " is already claimed by " + owner + ".</color>");
             showCurrentChunk(player, false);
@@ -1225,7 +1378,7 @@ public final class CivicCore extends Plugin implements Listener {
             visual = createChunkVisual(chunk.x, chunk.z, groundY,
                     0.15f, 0.85f, 0.30f, 0.12f,
                     0.25f, 1.0f, 0.40f, 0.95f);
-        } else if (claim.ownerUid().equals(characterKey(player))) {
+        } else if (canAccessOwner(characterKey(player), claim.ownerUid())) {
             visual = createChunkVisual(chunk.x, chunk.z, groundY,
                     0.15f, 0.45f, 1.0f, 0.12f,
                     0.30f, 0.65f, 1.0f, 0.95f);
@@ -1606,6 +1759,11 @@ public final class CivicCore extends Plugin implements Listener {
     }
 
     private void confirmDeleteCharacter(Player player, CharacterService.CharacterSummary character) {
+        Group membership = groups.findByMember(character.economyKey()).orElse(null);
+        if (membership != null && membership.members().get(character.economyKey()).role() == GroupRole.OWNER) {
+            player.sendTextMessage("<color=#FF7777>Disband the clan before deleting its owner character.</color>");
+            return;
+        }
         player.showMessageBox(MessageBoxButtons.Yes_No, "Delete character",
                 "Permanently delete " + character.name()
                         + "? Their inventory, balance, and claims will also be deleted.",
@@ -1614,6 +1772,7 @@ public final class CivicCore extends Plugin implements Listener {
                     try {
                         CharacterService.CharacterSummary active = activeCharacters.get(player.getUID());
                         characterService.deleteCharacter(player.getUID(), character);
+                        groups.removeDeletedCharacter(character.economyKey());
                         int removedClaims = claims.deleteClaimsByOwner(character.economyKey());
                         economy.deleteAccount(character.economyKey());
                         if (active != null && active.id().equals(character.id())) {
@@ -1680,6 +1839,11 @@ public final class CivicCore extends Plugin implements Listener {
         String identity = character.economyKey();
         activeClaimIdentities.put(player.getUID(), identity);
         return identity;
+    }
+
+    private boolean canAccessOwner(String characterIdentity, String ownerIdentity) {
+        return characterIdentity != null && (ownerIdentity.equals(characterIdentity)
+                || groups.canAccess(characterIdentity, ownerIdentity));
     }
 
     private void saveActiveCharacters() {
