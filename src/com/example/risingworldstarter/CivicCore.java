@@ -123,6 +123,7 @@ public final class CivicCore extends Plugin implements Listener {
     private final Map<String, AboutView> aboutViews = new ConcurrentHashMap<>();
     private final Map<String, CommandListView> commandListViews = new ConcurrentHashMap<>();
     private final Map<String, JournalView> journalViews = new ConcurrentHashMap<>();
+    private final Map<String, ClanView> clanViews = new ConcurrentHashMap<>();
     private final Map<String, UserStoreView> userStoreViews = new ConcurrentHashMap<>();
     private final Map<String, CharacterService.CharacterSummary> activeCharacters = new ConcurrentHashMap<>();
     private final Map<String, String> activeClaimIdentities = new ConcurrentHashMap<>();
@@ -373,6 +374,7 @@ public final class CivicCore extends Plugin implements Listener {
             }
         }
         journalViews.clear();
+        clanViews.clear();
         userStoreViews.clear();
         activeCharacters.clear();
         activeClaimIdentities.clear();
@@ -484,6 +486,7 @@ public final class CivicCore extends Plugin implements Listener {
         commandListViews.remove(event.getPlayer().getUID());
         JournalView journalView = journalViews.remove(event.getPlayer().getUID());
         if (journalView != null) saveJournalPage(event.getPlayer(), journalView, false);
+        clanViews.remove(event.getPlayer().getUID());
         userStoreViews.remove(event.getPlayer().getUID());
         characterSelectionViews.remove(event.getPlayer().getUID());
         appearanceViews.remove(event.getPlayer().getUID());
@@ -914,7 +917,7 @@ public final class CivicCore extends Plugin implements Listener {
                 List.of(), this::handleClaimAdminCommand);
         registerCommand("Storage", "/chest <lock|unlock|status>", "Manage the chest you are looking at.", true,
                 List.of(), this::handleChestCommand);
-        registerCommand("Groups", "/clan", "Show clan command usage.", true, List.of("/group"), List.of(
+        registerCommand("Groups", "/clan", "Open the clan management dialog.", true, List.of("/group"), List.of(
                 new CommandHelp("/clan create <name>", "Create a new clan."),
                 new CommandHelp("/clan info", "Show clan members, roles, and claims."),
                 new CommandHelp("/clan invite <character>", "Invite an online character."),
@@ -1336,7 +1339,7 @@ public final class CivicCore extends Plugin implements Listener {
     }
 
     private void handleClanCommand(Player player, String[] parts) {
-        if (parts.length < 2) { sendClanUsage(player); return; }
+        if (parts.length < 2) { toggleClanDialog(player); return; }
         String characterKey = characterKey(player);
         String action = parts[1].toLowerCase(Locale.US);
         try {
@@ -1473,6 +1476,267 @@ public final class CivicCore extends Plugin implements Listener {
     private static void sendClanUsage(Player player) {
         player.sendTextMessage("<color=#E8C547>Clan commands:</color> create, info, invite, accept, leave, "
                 + "kick, promote, demote, balance, deposit, withdraw, claim, unclaim, disband");
+    }
+
+    private void toggleClanDialog(Player player) {
+        if (clanViews.containsKey(player.getUID())) {
+            closeClanDialog(player);
+            return;
+        }
+        if (journalViews.containsKey(player.getUID())) closeJournal(player);
+        if (storeViews.containsKey(player.getUID())) closeStore(player);
+        if (userStoreViews.containsKey(player.getUID())) closeUserStore(player);
+        if (adminViews.containsKey(player.getUID())) closeAdminDashboard(player);
+        if (aboutViews.containsKey(player.getUID())) closeAbout(player);
+        if (commandListViews.containsKey(player.getUID())) closeCommands(player);
+        openClanDialog(player);
+    }
+
+    private void openClanDialog(Player player) {
+        ClanView previous = clanViews.remove(player.getUID());
+        if (previous != null) player.removeUIElement(previous.window());
+        String actorKey = characterKey(player);
+        Group group = groups.findByMember(actorKey).orElse(null);
+
+        UIElement window = new UIElement();
+        window.setPosition(50f, 50f, true);
+        window.setPivot(Pivot.MiddleCenter);
+        window.setSize(900f, 650f, false);
+        window.setBackgroundColor((int) 0x171A20F8L);
+        window.setBorder(2f);
+        window.setBorderColor((int) 0x8E62C7FFL);
+        window.setBorderEdgeRadius(8f, false);
+
+        UILabel title = new UILabel(group == null ? "Clan Management" : group.name());
+        title.setPosition(24f, 14f, false);
+        title.setSize(740f, 42f, false);
+        title.setFontSize(28f);
+        title.setFontColor((int) 0xD8B7FFFFL);
+        title.setTextAlign(TextAnchor.MiddleLeft);
+        window.addChild(title);
+        UILabel close = clanButton("X", 844f, 16f, 32f, 34f);
+        close.setBackgroundColor((int) 0x8B2D2DFFL);
+        window.addChild(close);
+
+        Map<Integer, ClanDialogAction> actions = new ConcurrentHashMap<>();
+        if (group == null) {
+            UILabel message = new UILabel("You do not currently belong to a clan.\n"
+                    + "Create a clan or accept a pending invitation.");
+            message.setPosition(80f, 150f, false);
+            message.setSize(740f, 100f, false);
+            message.setFontSize(21f);
+            message.setFontColor((int) 0xDDDDDDFFL);
+            message.setTextAlign(TextAnchor.MiddleCenter);
+            window.addChild(message);
+            UILabel create = clanButton("Create Clan", 220f, 290f, 210f, 48f);
+            UILabel accept = clanButton("Accept Invitation", 470f, 290f, 210f, 48f);
+            window.addChild(create);
+            window.addChild(accept);
+            actions.put(create.getID(), new ClanDialogAction("create", null));
+            actions.put(accept.getID(), new ClanDialogAction("accept", null));
+        } else {
+            GroupMember actor = group.members().get(actorKey);
+            boolean owner = actor.role() == GroupRole.OWNER;
+            boolean manager = actor.role() == GroupRole.MANAGER;
+            boolean canManage = owner || manager;
+
+            UILabel role = new UILabel("Your role: " + formatGroupRole(actor.role())
+                    + "     Claims: " + claims.getClaimsByOwner(group.claimOwnerId()).size());
+            role.setPosition(26f, 62f, false);
+            role.setSize(550f, 32f, false);
+            role.setFontSize(17f);
+            role.setFontColor((int) 0xCFCFCFFFL);
+            role.setTextAlign(TextAnchor.MiddleLeft);
+            window.addChild(role);
+
+            UILabel treasury = new UILabel(canManage
+                    ? "Treasury: " + formatBalance(groups.getBalance(group.id(), actorKey))
+                    : "Treasury: Owner and managers only");
+            treasury.setPosition(590f, 62f, false);
+            treasury.setSize(280f, 32f, false);
+            treasury.setFontSize(17f);
+            treasury.setFontColor((int) 0xE8C547FFL);
+            treasury.setTextAlign(TextAnchor.MiddleRight);
+            window.addChild(treasury);
+
+            UILabel membersTitle = new UILabel("Members");
+            membersTitle.setPosition(26f, 108f, false);
+            membersTitle.setSize(550f, 32f, false);
+            membersTitle.setFontSize(21f);
+            membersTitle.setFontColor((int) 0xF4E3A1FFL);
+            window.addChild(membersTitle);
+            UIScrollView members = new UIScrollView(UIScrollView.ScrollViewMode.Vertical);
+            members.setPosition(24f, 146f, false);
+            members.setSize(852f, 330f, false);
+            members.setVerticalScrollerVisibility(UIScrollView.ScrollerVisibility.Auto);
+            members.setHorizontalScrollerVisibility(UIScrollView.ScrollerVisibility.Hidden);
+            window.addChild(members);
+
+            float rowY = 0f;
+            for (GroupMember member : group.members().values()) {
+                UILabel row = new UILabel(member.name() + "  [" + formatGroupRole(member.role()) + "]");
+                row.setPosition(0f, rowY, false);
+                row.setSize(460f, 40f, false);
+                row.setFontSize(17f);
+                row.setFontColor((int) 0xFFFFFFFFL);
+                row.setTextAlign(TextAnchor.MiddleLeft);
+                row.setBackgroundColor(((int) (rowY / 46f)) % 2 == 0
+                        ? (int) 0x28313DFFL : (int) 0x202832FFL);
+                members.addChild(row);
+                if (!member.characterKey().equals(actorKey)) {
+                    float actionX = 480f;
+                    if (owner && member.role() != GroupRole.OWNER) {
+                        String roleAction = member.role() == GroupRole.MANAGER ? "demote" : "promote";
+                        UILabel roleButton = clanButton(roleAction.equals("promote") ? "Promote" : "Demote",
+                                actionX, rowY + 3f, 105f, 34f);
+                        members.addChild(roleButton);
+                        actions.put(roleButton.getID(), new ClanDialogAction(roleAction, member.characterKey()));
+                        actionX += 115f;
+                    }
+                    boolean canKick = owner || (manager && member.role() == GroupRole.MEMBER);
+                    if (canKick) {
+                        UILabel kick = clanButton("Remove", actionX, rowY + 3f, 105f, 34f);
+                        kick.setBackgroundColor((int) 0x8B4A2DFFL);
+                        members.addChild(kick);
+                        actions.put(kick.getID(), new ClanDialogAction("kick", member.characterKey()));
+                    }
+                }
+                rowY += 46f;
+            }
+
+            float controlsY = 500f;
+            if (canManage) {
+                addClanActionButton(window, actions, "Invite", 24f, controlsY, "invite");
+                addClanActionButton(window, actions, "Deposit", 154f, controlsY, "deposit");
+                addClanActionButton(window, actions, "Withdraw", 284f, controlsY, "withdraw");
+                addClanActionButton(window, actions, "Claim Here", 414f, controlsY, "claim");
+                addClanActionButton(window, actions, "Unclaim Here", 544f, controlsY, "unclaim");
+            }
+            if (owner) {
+                UILabel disband = addClanActionButton(window, actions, "Disband", 724f, 574f, "disband");
+                disband.setBackgroundColor((int) 0x8B2D2DFFL);
+            } else {
+                UILabel leave = addClanActionButton(window, actions, "Leave Clan", 724f, 574f, "leave");
+                leave.setBackgroundColor((int) 0x8B4A2DFFL);
+            }
+            addClanActionButton(window, actions, "Refresh", 24f, 574f, "refresh");
+        }
+
+        clanViews.put(player.getUID(), new ClanView(window, close, actions));
+        player.addUIElement(window);
+        player.stopInput(true, true);
+        player.setMouseCursorVisible(true);
+    }
+
+    private UILabel addClanActionButton(UIElement window, Map<Integer, ClanDialogAction> actions,
+                                         String text, float x, float y, String action) {
+        UILabel button = clanButton(text, x, y, 120f, 40f);
+        window.addChild(button);
+        actions.put(button.getID(), new ClanDialogAction(action, null));
+        return button;
+    }
+
+    private static UILabel clanButton(String text, float x, float y, float width, float height) {
+        UILabel button = new UILabel(text);
+        button.setPosition(x, y, false);
+        button.setSize(width, height, false);
+        button.setFontSize(16f);
+        button.setFontColor((int) 0xFFFFFFFFL);
+        button.setTextAlign(TextAnchor.MiddleCenter);
+        button.setBackgroundColor((int) 0x594078FFL);
+        button.setBorderEdgeRadius(5f, false);
+        button.setClickable(true);
+        return button;
+    }
+
+    private void closeClanDialog(Player player) {
+        ClanView view = clanViews.remove(player.getUID());
+        if (view != null) player.removeUIElement(view.window());
+        player.stopInput(false, false);
+        player.setMouseCursorVisible(false);
+    }
+
+    private void handleClanDialogClick(Player player, ClanView view, int elementId) {
+        if (elementId == view.close().getID()) {
+            closeClanDialog(player);
+            return;
+        }
+        ClanDialogAction action = view.actions().get(elementId);
+        if (action == null) return;
+        String actorKey = characterKey(player);
+        switch (action.type()) {
+            case "refresh" -> openClanDialog(player);
+            case "create" -> player.showInputMessageBox("Create Clan", "Clan name:", "", value ->
+                    runClanDialogAction(player, () -> groups.create(value, actorKey, player.getName()),
+                            "Clan created."));
+            case "accept" -> runClanDialogAction(player,
+                    () -> groups.acceptInvitation(actorKey, player.getName()), "Invitation accepted.");
+            case "invite" -> player.showInputMessageBox("Invite Character",
+                    "Online character name:", "", value -> runClanDialogAction(player, () -> {
+                        Player target = Server.getPlayerByName(value == null ? "" : value.trim());
+                        if (target == null || !activeCharacters.containsKey(target.getUID()))
+                            throw new IllegalArgumentException("That character must be online and active.");
+                        Group group = groups.findByMember(actorKey)
+                                .orElseThrow(() -> new IllegalStateException("You do not belong to a clan."));
+                        groups.invite(group.id(), actorKey, characterKey(target));
+                        target.sendTextMessage("<color=#E8C547>" + player.getName() + " invited you to clan "
+                                + group.name() + ". Open /clan to accept.</color>");
+                    }, "Invitation sent."));
+            case "deposit", "withdraw" -> player.showInputMessageBox(
+                    action.type().equals("deposit") ? "Deposit Funds" : "Withdraw Funds",
+                    "Amount:", "", value -> runClanDialogAction(player, () -> {
+                        long amount = parseCurrencyAmount(value);
+                        Group group = groups.findByMember(actorKey)
+                                .orElseThrow(() -> new IllegalStateException("You do not belong to a clan."));
+                        if (action.type().equals("deposit")) groups.deposit(group.id(), actorKey, amount);
+                        else groups.withdraw(group.id(), actorKey, amount);
+                        updateBalanceLabel(player);
+                    }, action.type().equals("deposit") ? "Funds deposited." : "Funds withdrawn."));
+            case "claim" -> runClanDialogAction(player,
+                    () -> claimCurrentChunkForClan(player, actorKey), null);
+            case "unclaim" -> runClanDialogAction(player,
+                    () -> unclaimCurrentChunkForClan(player, actorKey), null);
+            case "promote", "demote" -> runClanDialogAction(player, () -> {
+                Group group = groups.findByMember(actorKey)
+                        .orElseThrow(() -> new IllegalStateException("You do not belong to a clan."));
+                groups.setManager(group.id(), actorKey, action.targetKey(), action.type().equals("promote"));
+            }, action.type().equals("promote") ? "Member promoted." : "Manager demoted.");
+            case "kick" -> confirmClanAction(player, "Remove Member",
+                    "Remove this character from the clan?", () -> {
+                        Group group = groups.findByMember(actorKey)
+                                .orElseThrow(() -> new IllegalStateException("You do not belong to a clan."));
+                        groups.kick(group.id(), actorKey, action.targetKey());
+                    }, "Member removed.");
+            case "leave" -> confirmClanAction(player, "Leave Clan",
+                    "Leave your current clan?", () -> groups.leave(actorKey), "You left the clan.");
+            case "disband" -> confirmClanAction(player, "Disband Clan",
+                    "Permanently disband this clan and release all clan claims?", () -> {
+                        Group group = groups.findByMember(actorKey)
+                                .orElseThrow(() -> new IllegalStateException("You do not belong to a clan."));
+                        Group removed = groups.disband(group.id(), actorKey);
+                        claims.deleteClaimsByOwner(removed.claimOwnerId());
+                    }, "Clan disbanded.");
+            default -> player.sendTextMessage("<color=#FF7777>Unknown clan dialog action.</color>");
+        }
+    }
+
+    private void confirmClanAction(Player player, String title, String message,
+                                   Runnable action, String successMessage) {
+        player.showMessageBox(MessageBoxButtons.Yes_No, title, message, -1, selected -> {
+            if (selected != null && selected == 0) runClanDialogAction(player, action, successMessage);
+        });
+    }
+
+    private void runClanDialogAction(Player player, Runnable action, String successMessage) {
+        try {
+            action.run();
+            if (successMessage != null)
+                player.sendTextMessage("<color=#77FF99>" + successMessage + "</color>");
+            if (player.isSpawned() && activeCharacters.containsKey(player.getUID())) openClanDialog(player);
+        } catch (RuntimeException exception) {
+            player.sendTextMessage("<color=#FF7777>" + exception.getMessage() + "</color>");
+            if (player.isSpawned() && activeCharacters.containsKey(player.getUID())) openClanDialog(player);
+        }
     }
 
     private ChestOwnership getOrAssignChest(long globalId, int chunkX, int chunkY, int chunkZ) {
@@ -2964,6 +3228,11 @@ public final class CivicCore extends Plugin implements Listener {
     @EventMethod
     public void onStoreClick(PlayerUIElementClickEvent event) {
         Player player = event.getPlayer();
+        ClanView clanView = clanViews.get(player.getUID());
+        if (clanView != null) {
+            handleClanDialogClick(player, clanView, event.getUIElement().getID());
+            return;
+        }
         JournalView journalView = journalViews.get(player.getUID());
         if (journalView != null) {
             handleJournalClick(player, journalView, event.getUIElement().getID());
@@ -3195,6 +3464,11 @@ public final class CivicCore extends Plugin implements Listener {
 
     private record UserStoreView(UIElement window, UILabel close, UILabel refresh,
                                  Map<Integer, Long> listingByButton) { }
+
+    private record ClanView(UIElement window, UILabel close,
+                            Map<Integer, ClanDialogAction> actions) { }
+
+    private record ClanDialogAction(String type, String targetKey) { }
 
     private static final class JournalView {
         private final UIElement window;
