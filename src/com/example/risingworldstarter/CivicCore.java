@@ -114,6 +114,7 @@ public final class CivicCore extends Plugin implements Listener {
             0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30
     };
     private final Map<String, UILabel> balanceLabels = new ConcurrentHashMap<>();
+    private final Map<String, CashInventoryView> cashInventoryViews = new ConcurrentHashMap<>();
     private final Map<String, UILabel> worldTimeLabels = new ConcurrentHashMap<>();
     private final Map<String, List<Area3D>> claimVisuals = new ConcurrentHashMap<>();
     private final Map<String, String> visualModes = new ConcurrentHashMap<>();
@@ -155,6 +156,7 @@ public final class CivicCore extends Plugin implements Listener {
     private Timer characterAutosaveTimer;
     private PayPeriod lastSalaryPeriod;
     private volatile boolean claimAdminOverrideEnabled = false;
+    private TextureAsset cashIconTexture;
 
     @Override
     public void onEnable() {
@@ -201,6 +203,8 @@ public final class CivicCore extends Plugin implements Listener {
         debug("Economy values: starting cash=" + formatBalance(economySettings.defaultBalance())
                 + ", claim cost=" + formatBalance(economySettings.claimCost())
                 + ", 8-hour salary=" + formatBalance(economySettings.baseSalary()));
+        cashIconTexture = TextureAsset.loadFromPlugin(this, "resources/icons/cash.png");
+        debug("Cash inventory icon loaded");
 
         // Item definitions are native game data and are not ready yet while a
         // hosted world is starting. Loading them here can terminate the game
@@ -358,6 +362,7 @@ public final class CivicCore extends Plugin implements Listener {
         }
         lastSalaryPeriod = null;
         balanceLabels.clear();
+        cashInventoryViews.clear();
         worldTimeLabels.clear();
         claimVisuals.clear();
         visualModes.clear();
@@ -474,6 +479,7 @@ public final class CivicCore extends Plugin implements Listener {
         activeClaimIdentities.remove(event.getPlayer().getUID());
         if (active != null) characterService.saveCharacter(event.getPlayer(), active);
         balanceLabels.remove(event.getPlayer().getUID());
+        cashInventoryViews.remove(event.getPlayer().getUID());
         worldTimeLabels.remove(event.getPlayer().getUID());
         claimVisuals.remove(event.getPlayer().getUID());
         visualModes.remove(event.getPlayer().getUID());
@@ -2026,6 +2032,8 @@ public final class CivicCore extends Plugin implements Listener {
                             activeClaimIdentities.remove(player.getUID());
                             UILabel balance = balanceLabels.remove(player.getUID());
                             if (balance != null) player.removeUIElement(balance);
+                            CashInventoryView cashView = cashInventoryViews.remove(player.getUID());
+                            if (cashView != null) player.removeUIElement(cashView.slot());
                         }
                         showCharacterSelection(player);
                         player.sendTextMessage("<color=#77FF99>Deleted " + character.name() + " and "
@@ -2066,6 +2074,7 @@ public final class CivicCore extends Plugin implements Listener {
         player.stopInput(false, false);
         player.setMouseCursorVisible(false);
         showBalance(player);
+        showCashInventorySlot(player);
         showWorldClock(player);
         player.sendTextMessage("<color=#77FF99>Now playing as " + character.name() + ".</color>");
         debug("Profile " + character.profileName() + " (" + player.getUID() + ") selected character "
@@ -2782,10 +2791,49 @@ public final class CivicCore extends Plugin implements Listener {
 
     /** Refreshes the HUD after another plugin changes a connected player's balance. */
     public void updateBalanceLabel(Player player) {
+        long balance = economy.getBalance(characterKey(player));
         UILabel label = balanceLabels.get(player.getUID());
         if (label != null) {
-            label.setText("Cash: " + formatBalance(economy.getBalance(characterKey(player))));
+            label.setText("Cash: " + formatBalance(balance));
         }
+        CashInventoryView cashView = cashInventoryViews.get(player.getUID());
+        if (cashView != null) {
+            cashView.quantity().setText(formatBalance(balance));
+        }
+    }
+
+    private void showCashInventorySlot(Player player) {
+        CashInventoryView oldView = cashInventoryViews.remove(player.getUID());
+        if (oldView != null) player.removeUIElement(oldView.slot());
+
+        UILabel slot = new UILabel();
+        slot.setPosition(98f, 15f, true);
+        slot.setPivot(Pivot.UpperRight);
+        slot.setSize(88f, 88f, false);
+        slot.setBackgroundColor((int) 0x18202AEEL);
+        slot.setBorder(2f);
+        slot.setBorderColor((int) 0xD4B75CFFL);
+        slot.setBorderEdgeRadius(8f, false);
+        slot.setClickable(true);
+        if (cashIconTexture != null) {
+            slot.style.backgroundImage.set(cashIconTexture);
+            slot.style.backgroundImageScaleMode.set(ScaleMode.ScaleToFit);
+        }
+
+        UILabel quantity = new UILabel();
+        quantity.setPosition(3f, 62f, false);
+        quantity.setSize(82f, 23f, false);
+        quantity.setTextAlign(TextAnchor.MiddleCenter);
+        quantity.setFontSize(14f);
+        quantity.setFontColor((int) 0xFFFFFFFFL);
+        quantity.setBackgroundColor((int) 0x10151DDFL);
+        quantity.setTextWrap(false);
+        slot.addChild(quantity);
+
+        CashInventoryView view = new CashInventoryView(slot, quantity);
+        cashInventoryViews.put(player.getUID(), view);
+        player.addUIElement(slot, UITarget.Inventory);
+        updateBalanceLabel(player);
     }
 
     private void showBalance(Player player) {
@@ -2908,6 +2956,13 @@ public final class CivicCore extends Plugin implements Listener {
     @EventMethod
     public void onStoreClick(PlayerUIElementClickEvent event) {
         Player player = event.getPlayer();
+        CashInventoryView cashView = cashInventoryViews.get(player.getUID());
+        if (cashView != null && event.getUIElement().getID() == cashView.slot().getID()) {
+            player.sendTextMessage("<color=#E8C547>Cash:</color> "
+                    + formatBalance(economy.getBalance(characterKey(player)))
+                    + " <color=#AAAAAA>(managed by CivicCore)</color>");
+            return;
+        }
         JournalView journalView = journalViews.get(player.getUID());
         if (journalView != null) {
             handleJournalClick(player, journalView, event.getUIElement().getID());
@@ -3123,6 +3178,9 @@ public final class CivicCore extends Plugin implements Listener {
     }
 
     private record CartLine(StoreCatalog.StoreItem item, int quantity) {
+    }
+
+    private record CashInventoryView(UILabel slot, UILabel quantity) {
     }
 
     private record AdminView(UIElement window, UILabel closeButton, UILabel refreshButton,

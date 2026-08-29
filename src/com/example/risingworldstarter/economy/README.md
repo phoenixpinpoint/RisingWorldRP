@@ -24,6 +24,11 @@ base-salary=1000.00
 Payday runs at 00:00, 08:00, and 16:00 in world time. It detects entry into a
 new pay period and rechecks after skipped nights.
 
+The active character's cash also appears as a CivicCore-owned slot on the
+native inventory screen. Its bundled icon displays the formatted database
+balance as the quantity. This is a virtual inventory element, so it cannot be
+crafted, stored, dropped, or purchased from either marketplace.
+
 ## Using the API from another plugin
 
 ```java
