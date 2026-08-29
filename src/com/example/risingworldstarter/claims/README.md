@@ -27,7 +27,7 @@ database. Other plugins can access claims through `CivicCore.getClaimService()`.
 - `/claimadmin list` lists claim administrators.
 
 In the `/claims` overview, boundaries are green when available, blue when owned
-by the viewing character, orange when owned by that character's clan, and red
+by the viewing character, purple when owned by that character's clan, and red
 when unavailable. The overview uses one bounded database query when opened.
 
 ## Protection rules
