@@ -594,7 +594,7 @@ public final class CivicCore extends Plugin implements Listener {
         // Opening a storage is governed by its own lock. Other object state
         // changes (doors, lights, etc.) remain covered by chunk protection.
         if (!isStorage(event.getObjectDefinition())) {
-            protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
+            protectInteraction(event, event.getChunkPositionX(), event.getChunkPositionZ());
         }
     }
 
@@ -716,7 +716,7 @@ public final class CivicCore extends Plugin implements Listener {
     }
 
     private void protectOwnedLand(Cancellable event, int chunkX, int chunkZ) {
-        protect(event, chunkX, chunkZ, true);
+        protect(event, chunkX, chunkZ, true, false);
     }
 
     private void refundConsumedItemAfterPlacement(Player player, short typeId, int variant) {
@@ -736,10 +736,15 @@ public final class CivicCore extends Plugin implements Listener {
     }
 
     private void protect(Cancellable event, int chunkX, int chunkZ) {
-        protect(event, chunkX, chunkZ, false);
+        protect(event, chunkX, chunkZ, false, false);
     }
 
-    private void protect(Cancellable event, int chunkX, int chunkZ, boolean requiresOwnedLand) {
+    private void protectInteraction(Cancellable event, int chunkX, int chunkZ) {
+        protect(event, chunkX, chunkZ, false, true);
+    }
+
+    private void protect(Cancellable event, int chunkX, int chunkZ, boolean requiresOwnedLand,
+                         boolean alwaysNotify) {
         if (event.isCancelled()) return;
         Player player = ((net.risingworld.api.events.player.PlayerEvent) event).getPlayer();
         Claim claim = claims.getClaim(chunkX, chunkZ).orElse(null);
@@ -751,7 +756,7 @@ public final class CivicCore extends Plugin implements Listener {
             sendClaimProtectionNotice(player,
                     "Claim chunk " + chunkX + ", " + chunkZ
                             + " before placing items or modifying terrain. ["
-                            + event.getClass().getSimpleName() + "]");
+                            + event.getClass().getSimpleName() + "]", alwaysNotify);
             return;
         }
         String activeClaimIdentity = activeClaimIdentity(player);
@@ -762,10 +767,19 @@ public final class CivicCore extends Plugin implements Listener {
         debug("Denied " + event.getClass().getSimpleName() + " for " + player.getName()
                 + " in chunk " + chunkX + "," + chunkZ + ": active claim identity="
                 + activeClaimIdentity + ", owner=" + claim.ownerUid());
-        sendClaimProtectionNotice(player, "This chunk is protected by " + claim.ownerName() + ".");
+        sendClaimProtectionNotice(player, "This chunk is protected by " + claim.ownerName() + ".",
+                alwaysNotify);
     }
 
     private void sendClaimProtectionNotice(Player player, String message) {
+        sendClaimProtectionNotice(player, message, false);
+    }
+
+    private void sendClaimProtectionNotice(Player player, String message, boolean alwaysNotify) {
+        if (alwaysNotify) {
+            player.sendTextMessage("<color=#FF7777>" + message + "</color>");
+            return;
+        }
         long now = System.currentTimeMillis();
         Long previous = claimProtectionNotices.put(player.getUID(), now);
         if (previous == null || now - previous >= 1500L) {
