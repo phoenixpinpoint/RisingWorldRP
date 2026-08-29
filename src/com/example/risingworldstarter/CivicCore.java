@@ -3173,9 +3173,9 @@ public final class CivicCore extends Plugin implements Listener {
         label.setTextAlign(TextAnchor.MiddleCenter);
         label.setFontSize(22f);
         label.setFontColor((int) 0xF4E3A1FFL);
-        //label.setBackgroundColor((int) 0x161B22CCL);
-        //label.setBorder(2f);
-        //label.setBorderColor((int) 0xE8C547FFL);
+        label.setBackgroundColor((int) 0x161B22D9L);
+        label.setBorder(2f);
+        label.setBorderColor((int) 0xE8C547FFL);
         label.setPosition(12f, 12f, false);
         label.setPivot(Pivot.UpperLeft);
         label.setSize(260f, 42f, false);
@@ -3195,6 +3195,9 @@ public final class CivicCore extends Plugin implements Listener {
         label.setTextAlign(TextAnchor.MiddleCenter);
         label.setFontSize(20f);
         label.setFontColor((int) 0xF4E3A1FFL);
+        label.setBackgroundColor((int) 0x161B22D9L);
+        label.setBorder(2f);
+        label.setBorderColor((int) 0xE8C547FFL);
         label.setPosition(50f, 0.5f, true);
         label.setPivot(Pivot.UpperCenter);
         label.setSize(460f, 42f, false);
