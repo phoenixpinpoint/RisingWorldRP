@@ -1519,8 +1519,8 @@ public final class CivicCore extends Plugin implements Listener {
                             0.30f, 0.65f, 1.0f, 0.95f);
                 } else if (claim.ownerUid().equals(clanOwnerId)) {
                     visual = createChunkVisual(chunkX, chunkZ, groundY,
-                            1.0f, 0.50f, 0.08f, 0.12f,
-                            1.0f, 0.65f, 0.18f, 0.95f);
+                            0.62f, 0.25f, 0.90f, 0.12f,
+                            0.78f, 0.45f, 1.0f, 0.95f);
                 } else {
                     visual = createChunkVisual(chunkX, chunkZ, groundY,
                             1.0f, 0.15f, 0.15f, 0.12f,
@@ -1534,7 +1534,7 @@ public final class CivicCore extends Plugin implements Listener {
         visualModes.put(player.getUID(), "claims");
         visualHeights.put(player.getUID(), groundY);
         player.sendTextMessage("<color=#77AAFF>Blue: yours</color> | <color=#77FF77>Green: available</color>"
-                + " | <color=#FF991F>Orange: your clan</color> | <color=#FF5555>Red: unavailable</color>");
+                + " | <color=#C774FF>Purple: your clan</color> | <color=#FF5555>Red: unavailable</color>");
         player.sendTextMessage("<color=#AAAAAA>Showing a " + sideLength + "x" + sideLength
                 + " chunk area around you. Use /claims again to hide it.</color>");
     }
