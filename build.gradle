@@ -68,6 +68,7 @@ def sdkJar = findSdkJar(risingWorldDirectory)
 sourceSets {
     main {
         java.srcDirs = ['src']
+        java.exclude 'test/**'
         resources.srcDirs = ['.', 'src']
         resources.include 'resources/**', 'com/example/risingworldstarter/database/schema.sql'
     }

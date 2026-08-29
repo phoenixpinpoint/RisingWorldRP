@@ -812,6 +812,17 @@ public final class CivicCore extends Plugin implements Listener {
         String[] parts = event.getCommand().trim().split("\\s+");
         RegisteredCommand command = commandRegistry.find(parts[0]);
         if (command == null) {
+            event.setCancelled(true);
+            RegisteredCommand suggestion = commandRegistry.suggest(parts[0]);
+            if (suggestion != null) {
+                event.getPlayer().sendTextMessage("<color=#FFAA66>Unknown command " + parts[0]
+                        + ". Did you mean </color><color=#77AAFF>" + suggestion.name()
+                        + "</color><color=#FFAA66>?</color>");
+            } else {
+                event.getPlayer().sendTextMessage("<color=#FF7777>Invalid command: " + parts[0]
+                        + ".</color> <color=#AAAAAA>Use </color><color=#77AAFF>/commands</color>"
+                        + "<color=#AAAAAA> to see available commands.</color>");
+            }
             return;
         }
         event.setCancelled(true);
@@ -819,7 +830,35 @@ public final class CivicCore extends Plugin implements Listener {
             event.getPlayer().sendTextMessage("<color=#FFAA66>Select or create a character first.</color>");
             return;
         }
-        command.action().execute(event.getPlayer(), parts);
+        if ((parts.length == 1 && command.usage().contains("<"))
+                || (parts.length > 1 && command.usage().equalsIgnoreCase(command.name())
+                && command.additionalHelp().isEmpty())) {
+            sendInvalidCommand(event.getPlayer(), command);
+            return;
+        }
+        try {
+            command.action().execute(event.getPlayer(), parts);
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            String message = exception.getMessage();
+            event.getPlayer().sendTextMessage("<color=#FF7777>"
+                    + (message == null || message.isBlank() ? "Command could not be completed." : message)
+                    + "</color>");
+            sendCommandUsage(event.getPlayer(), command);
+        }
+    }
+
+    private static void sendInvalidCommand(Player player, RegisteredCommand command) {
+        player.sendTextMessage("<color=#FFAA66>Invalid or incomplete command.</color>");
+        sendCommandUsage(player, command);
+    }
+
+    private static void sendCommandUsage(Player player, RegisteredCommand command) {
+        player.sendTextMessage("<color=#AAAAAA>Usage:</color> <color=#77AAFF>"
+                + command.usage() + "</color>");
+        for (CommandHelp help : command.additionalHelp()) {
+            player.sendTextMessage("<color=#AAAAAA>       </color><color=#77AAFF>"
+                    + help.usage() + "</color>");
+        }
     }
 
     private void registerCommands() {
@@ -1342,7 +1381,10 @@ public final class CivicCore extends Plugin implements Listener {
                     player.sendTextMessage("<color=#77FF99>Disbanded " + removed.name() + " and released "
                             + removedClaims + " clan claim(s).</color>");
                 }
-                default -> sendClanUsage(player);
+                default -> {
+                    player.sendTextMessage("<color=#FFAA66>Unknown clan command: " + parts[1] + ".</color>");
+                    sendClanUsage(player);
+                }
             }
         } catch (IllegalArgumentException | IllegalStateException exception) {
             player.sendTextMessage("<color=#FF7777>" + exception.getMessage() + "</color>");

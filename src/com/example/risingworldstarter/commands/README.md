@@ -55,6 +55,13 @@ The action receives the invoked command or alias at `arguments[0]`, followed by
 the entered arguments. CivicCore cancels the original chat-command event before
 executing the action.
 
+CivicCore validates registered command input before invoking the action.
+Missing required arguments and unexpected arguments display the registered
+usage. Short command-name typos receive a likely-command suggestion. All other
+unregistered slash commands are rejected and point the player to `/commands`.
+Other plugins should register commands with this shared registry so CivicCore
+can dispatch them instead of treating them as invalid.
+
 ## Plugin shutdown
 
 Plugins should remove their registrations from `onDisable()`:
