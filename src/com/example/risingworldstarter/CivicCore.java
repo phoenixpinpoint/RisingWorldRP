@@ -23,6 +23,8 @@ import com.example.risingworldstarter.groups.GroupService;
 import com.example.risingworldstarter.journal.JournalPage;
 import com.example.risingworldstarter.journal.JournalSection;
 import com.example.risingworldstarter.journal.JournalService;
+import com.example.risingworldstarter.userstore.UserStoreListing;
+import com.example.risingworldstarter.userstore.UserStoreService;
 import net.risingworld.api.Plugin;
 import net.risingworld.api.Server;
 import net.risingworld.api.Timer;
@@ -49,6 +51,7 @@ import net.risingworld.api.definitions.Constructions;
 import net.risingworld.api.objects.Player;
 import net.risingworld.api.objects.Area;
 import net.risingworld.api.objects.Item;
+import net.risingworld.api.objects.Inventory;
 import net.risingworld.api.objects.Skin;
 import net.risingworld.api.ui.UIElement;
 import net.risingworld.api.ui.UILabel;
@@ -83,6 +86,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -119,6 +123,7 @@ public final class CivicCore extends Plugin implements Listener {
     private final Map<String, AboutView> aboutViews = new ConcurrentHashMap<>();
     private final Map<String, CommandListView> commandListViews = new ConcurrentHashMap<>();
     private final Map<String, JournalView> journalViews = new ConcurrentHashMap<>();
+    private final Map<String, UserStoreView> userStoreViews = new ConcurrentHashMap<>();
     private final Map<String, CharacterService.CharacterSummary> activeCharacters = new ConcurrentHashMap<>();
     private final Map<String, String> activeClaimIdentities = new ConcurrentHashMap<>();
     private final Map<String, CharacterSelectionView> characterSelectionViews = new ConcurrentHashMap<>();
@@ -139,6 +144,7 @@ public final class CivicCore extends Plugin implements Listener {
     private ChestService chests;
     private GroupService groups;
     private JournalService journals;
+    private UserStoreService userStore;
     private EconomySettings economySettings;
     private StoreCatalog storeCatalog;
     private Path marketplaceConfigPath;
@@ -177,6 +183,7 @@ public final class CivicCore extends Plugin implements Listener {
         chests = new ChestService(database);
         groups = new GroupService(database);
         journals = new JournalService(database);
+        userStore = new UserStoreService(database);
         characterService = new CharacterService(database);
         groups.migrateLegacy(worldDataPath.resolve("groups.properties"));
         if (LegacyStateMigrator.migrate(database, worldDataPath, databaseEconomy,
@@ -366,6 +373,7 @@ public final class CivicCore extends Plugin implements Listener {
             }
         }
         journalViews.clear();
+        userStoreViews.clear();
         activeCharacters.clear();
         activeClaimIdentities.clear();
         characterSelectionViews.clear();
@@ -476,6 +484,7 @@ public final class CivicCore extends Plugin implements Listener {
         commandListViews.remove(event.getPlayer().getUID());
         JournalView journalView = journalViews.remove(event.getPlayer().getUID());
         if (journalView != null) saveJournalPage(event.getPlayer(), journalView, false);
+        userStoreViews.remove(event.getPlayer().getUID());
         characterSelectionViews.remove(event.getPlayer().getUID());
         appearanceViews.remove(event.getPlayer().getUID());
         claimProtectionNotices.remove(event.getPlayer().getUID());
@@ -835,6 +844,9 @@ public final class CivicCore extends Plugin implements Listener {
                 });
         registerCommand("Marketplace", "/store", "Open or close the marketplace.", true, List.of(),
                 (player, parts) -> toggleStore(player));
+        registerCommand("Marketplace", "/userstore", "Open the player marketplace.", true, List.of("/ustore"), List.of(
+                new CommandHelp("/userstore sell <price> [quantity]", "List the equipped item stack for sale.")),
+                this::handleUserStoreCommand);
         registerCommand("Administration", "/admin", "Open the administrator dashboard.", true, List.of(),
                 (player, parts) -> toggleAdminDashboard(player));
         registerCommand("Land Claims", "/claim", "Claim your current chunk.", true, List.of(),
@@ -1988,6 +2000,10 @@ public final class CivicCore extends Plugin implements Listener {
     }
 
     private void confirmDeleteCharacter(Player player, CharacterService.CharacterSummary character) {
+        if (userStore.hasListings(character.economyKey())) {
+            player.sendTextMessage("<color=#FF7777>Cancel this character's user-store listings before deleting them.</color>");
+            return;
+        }
         Group membership = groups.findByMember(character.economyKey()).orElse(null);
         if (membership != null && membership.members().get(character.economyKey()).role() == GroupRole.OWNER) {
             player.sendTextMessage("<color=#FF7777>Disband the clan before deleting its owner character.</color>");
@@ -2300,10 +2316,128 @@ public final class CivicCore extends Plugin implements Listener {
         player.setMouseCursorVisible(false);
     }
 
+    private void handleUserStoreCommand(Player player, String[] parts) {
+        if (parts.length == 1) { toggleUserStore(player); return; }
+        if (!parts[1].equalsIgnoreCase("sell") || parts.length < 3 || parts.length > 4) {
+            player.sendTextMessage("Usage: /userstore or /userstore sell <price> [quantity]"); return;
+        }
+        try {
+            long price = parseCurrencyAmount(parts[2]);
+            Inventory inventory = player.getInventory();
+            int slot = inventory.getEquippedItemSlot();
+            Inventory.SlotType slotType = inventory.getEquippedItemSlotType();
+            Item equipped = inventory.getItem(slot, slotType);
+            if (equipped == null || !equipped.isValid()) throw new IllegalStateException("Equip the item you want to sell.");
+            StoreCatalog.StoreItem catalogItem = storeCatalog.find(equipped.getTypeID());
+            if (catalogItem == null) throw new IllegalStateException("That item cannot be listed in the user store.");
+            int quantity = parts.length == 4 ? Integer.parseInt(parts[3]) : equipped.getStack();
+            if (quantity <= 0 || quantity > equipped.getStack())
+                throw new IllegalArgumentException("Quantity must be between 1 and " + equipped.getStack() + ".");
+            short itemType = equipped.getTypeID(); int variant = equipped.getVariant();
+            if (!inventory.removeItem(slot, slotType, quantity)) throw new IllegalStateException("Could not remove the item from inventory.");
+            try {
+                UserStoreListing listing = userStore.create(characterKey(player), player.getName(),
+                        itemType, variant, quantity, price);
+                player.sendTextMessage("<color=#77FF99>Listed " + quantity + " × " + catalogItem.name()
+                        + " for " + formatBalance(price) + " (listing #" + listing.id() + ").</color>");
+            } catch (RuntimeException exception) {
+                inventory.addItem(itemType, variant, quantity); throw exception;
+            }
+        } catch (NumberFormatException exception) {
+            player.sendTextMessage("<color=#FF7777>Quantity must be a whole number.</color>");
+        } catch (RuntimeException exception) {
+            player.sendTextMessage("<color=#FF7777>" + exception.getMessage() + "</color>");
+        }
+    }
+
+    private void toggleUserStore(Player player) {
+        if (userStoreViews.containsKey(player.getUID())) { closeUserStore(player); return; }
+        if (storeViews.containsKey(player.getUID())) closeStore(player);
+        if (journalViews.containsKey(player.getUID())) closeJournal(player);
+        openUserStore(player);
+    }
+
+    private void openUserStore(Player player) {
+        UserStoreView old = userStoreViews.remove(player.getUID());
+        if (old != null) player.removeUIElement(old.window());
+        UIElement window = new UIElement(); window.setPosition(50f,50f,true); window.setPivot(Pivot.MiddleCenter);
+        window.setSize(780f,620f,false); window.setBackgroundColor((int)0x161B22F5L);
+        window.setBorder(2f); window.setBorderColor((int)0xE8C547FFL); window.setBorderEdgeRadius(8f,false);
+        UILabel title = new UILabel("User Store"); title.setPosition(20f,12f,false); title.setSize(620f,42f,false);
+        title.setFontSize(28f); title.setFontColor((int)0xF4E3A1FFL); title.setTextAlign(TextAnchor.MiddleLeft); window.addChild(title);
+        UILabel hint = new UILabel("Equip an item, then use /userstore sell <price> [quantity] to list it.");
+        hint.setPosition(20f,56f,false); hint.setSize(680f,34f,false); hint.setFontSize(15f);
+        hint.setFontColor((int)0xBBBBBBFFL); hint.setTextAlign(TextAnchor.MiddleLeft); window.addChild(hint);
+        UILabel close = journalButton("X",724f,14f,34f,34f); close.setBackgroundColor((int)0x8B2D2DFFL); window.addChild(close);
+        UILabel refresh = journalButton("Refresh",620f,56f,138f,34f); window.addChild(refresh);
+        UIScrollView list = new UIScrollView(UIScrollView.ScrollViewMode.Vertical);
+        list.setPosition(20f,100f,false); list.setSize(738f,498f,false);
+        list.setVerticalScrollerVisibility(UIScrollView.ScrollerVisibility.Auto);
+        list.setHorizontalScrollerVisibility(UIScrollView.ScrollerVisibility.Hidden); window.addChild(list);
+        Map<Integer,Long> listingByButton = new ConcurrentHashMap<>();
+        int index=0; float y=0f; String buyerKey=characterKey(player);
+        for(UserStoreListing listing:userStore.getListings()){
+            StoreCatalog.StoreItem item=storeCatalog.find(listing.itemType());
+            if(item==null)continue;
+            UIElement row=new UIElement(); row.setPosition(0f,y,false); row.setSize(710f,78f,false);
+            row.setBackgroundColor(index++%2==0?(int)0x28313DFFL:(int)0x202832FFL); list.addChild(row);
+            UILabel details=new UILabel(listing.quantity()+" × "+item.name()+"\nSeller: "+listing.sellerName());
+            details.setPosition(16f,5f,false); details.setSize(390f,68f,false); details.setFontSize(17f);
+            details.setFontColor((int)0xFFFFFFFFL); details.setTextAlign(TextAnchor.MiddleLeft); row.addChild(details);
+            UILabel price=new UILabel(formatBalance(listing.price())); price.setPosition(414f,16f,false);
+            price.setSize(130f,46f,false); price.setFontSize(18f); price.setFontColor((int)0xF4E3A1FFL);
+            price.setTextAlign(TextAnchor.MiddleCenter); row.addChild(price);
+            boolean own=listing.sellerKey().equals(buyerKey);
+            UILabel action=journalButton(own?"CANCEL":"BUY",554f,16f,136f,46f);
+            action.setBackgroundColor(own?(int)0x8B2D2DFFL:(int)0x2D7D46FFL); row.addChild(action);
+            listingByButton.put(action.getID(),listing.id()); y+=84f;
+        }
+        if(index==0){UILabel empty=new UILabel("No player listings are currently available.");empty.setPosition(0f,30f,false);
+            empty.setSize(710f,50f,false);empty.setFontSize(18f);empty.setFontColor((int)0xAAAAAAFFL);
+            empty.setTextAlign(TextAnchor.MiddleCenter);list.addChild(empty);}
+        UserStoreView view=new UserStoreView(window,close,refresh,listingByButton);
+        userStoreViews.put(player.getUID(),view);player.addUIElement(window);player.setMouseCursorVisible(true);
+    }
+
+    private void closeUserStore(Player player){UserStoreView view=userStoreViews.remove(player.getUID());if(view!=null)player.removeUIElement(view.window());player.setMouseCursorVisible(false);}
+
+    private void handleUserStoreClick(Player player,UserStoreView view,int elementId){
+        if(elementId==view.close().getID()){closeUserStore(player);return;}
+        if(elementId==view.refresh().getID()){openUserStore(player);return;}
+        Long listingId=view.listingByButton().get(elementId);if(listingId==null)return;
+        String buyerKey=characterKey(player);
+        UserStoreListing listing=userStore.getListings().stream().filter(item->item.id()==listingId).findFirst().orElse(null);
+        if(listing==null){player.sendTextMessage("<color=#FFAA66>That listing is no longer available.</color>");openUserStore(player);return;}
+        try{
+            if(listing.sellerKey().equals(buyerKey)){
+                UserStoreListing cancelled=userStore.cancel(listingId,buyerKey).orElseThrow();
+                if(player.getInventory().addItem(cancelled.itemType(),cancelled.itemVariant(),cancelled.quantity())==null){
+                    userStore.create(cancelled.sellerKey(),cancelled.sellerName(),cancelled.itemType(),cancelled.itemVariant(),cancelled.quantity(),cancelled.price());
+                    throw new IllegalStateException("Your inventory is full; the item was relisted.");
+                }
+                player.sendTextMessage("<color=#77FF99>Listing cancelled and item returned.</color>");
+            }else{
+                UserStoreListing purchased=userStore.purchase(listingId,buyerKey);
+                if(player.getInventory().addItem(purchased.itemType(),purchased.itemVariant(),purchased.quantity())==null){
+                    userStore.reversePurchase(purchased,buyerKey);throw new IllegalStateException("Your inventory is full; the purchase was refunded.");
+                }
+                updateBalanceLabel(player);
+                for (Player connected : Server.getAllPlayers()) {
+                    CharacterService.CharacterSummary active = activeCharacters.get(connected.getUID());
+                    if (active != null && active.economyKey().equals(purchased.sellerKey()))
+                        updateBalanceLabel(connected);
+                }
+                player.sendTextMessage("<color=#77FF99>Purchased listing for "+formatBalance(purchased.price())+".</color>");
+            }
+        }catch(RuntimeException exception){player.sendTextMessage("<color=#FF7777>"+exception.getMessage()+"</color>");}
+        openUserStore(player);
+    }
+
     private void toggleStore(Player player) {
         if (storeViews.containsKey(player.getUID())) {
             closeStore(player);
         } else {
+            if (userStoreViews.containsKey(player.getUID())) closeUserStore(player);
             if (adminViews.containsKey(player.getUID())) {
                 closeAdminDashboard(player);
             }
@@ -2437,6 +2571,7 @@ public final class CivicCore extends Plugin implements Listener {
         view.cartStatusLabels().clear();
         int itemIndex = 0;
         float yOffset = 0f;
+        Set<Short> userListedTypes = userStore.getListedItemTypes();
         for (StoreCatalog.StoreItem storeItem : storeCatalog.items()) {
             if (!"All".equals(view.selectedCategory())
                     && !storeItem.category().equals(view.selectedCategory())) {
@@ -2470,7 +2605,11 @@ public final class CivicCore extends Plugin implements Listener {
             }
             itemRow.addChild(icon);
 
-            UILabel itemDetails = new UILabel(storeItem.name() + "\n" + formatBalance(storeItem.price()));
+            boolean outOfStock = userListedTypes.contains(storeItem.id());
+            if (outOfStock) view.cart().remove(storeItem.id());
+            UILabel itemDetails = new UILabel(storeItem.name() + "\n"
+                    + (outOfStock ? "<color=#FF7777>OUT OF STOCK — available in User Store</color>"
+                    : formatBalance(storeItem.price())));
             itemDetails.setPosition(98f, 7f, false);
             itemDetails.setSize(280f, 72f, false);
             itemDetails.setFontSize(18f);
@@ -2480,10 +2619,12 @@ public final class CivicCore extends Plugin implements Listener {
 
             UILabel minusButton = createCartQuantityButton("-");
             minusButton.setPosition(402f, 20f, false);
+            minusButton.setClickable(!outOfStock);
+            if (outOfStock) minusButton.setBackgroundColor((int) 0x333333FFL);
             itemRow.addChild(minusButton);
-            view.decrementByButtonId().put(minusButton.getID(), storeItem);
+            if (!outOfStock) view.decrementByButtonId().put(minusButton.getID(), storeItem);
 
-            int quantity = view.cart().containsKey(storeItem.id())
+            int quantity = !outOfStock && view.cart().containsKey(storeItem.id())
                     ? view.cart().get(storeItem.id()).quantity() : 0;
             UILabel quantityLabel = new UILabel(Integer.toString(quantity));
             quantityLabel.setPosition(452f, 20f, false);
@@ -2497,8 +2638,10 @@ public final class CivicCore extends Plugin implements Listener {
 
             UILabel plusButton = createCartQuantityButton("+");
             plusButton.setPosition(518f, 20f, false);
+            plusButton.setClickable(!outOfStock);
+            if (outOfStock) plusButton.setBackgroundColor((int) 0x333333FFL);
             itemRow.addChild(plusButton);
-            view.incrementByButtonId().put(plusButton.getID(), storeItem);
+            if (!outOfStock) view.incrementByButtonId().put(plusButton.getID(), storeItem);
 
             UILabel inCartLabel = new UILabel("IN CART");
             inCartLabel.setPosition(578f, 20f, false);
@@ -2589,6 +2732,15 @@ public final class CivicCore extends Plugin implements Listener {
         if (view.cart().isEmpty()) {
             player.sendTextMessage("<color=#AAAAAA>Your shopping cart is empty.</color>");
             return;
+        }
+
+        Set<Short> userListedTypes = userStore.getListedItemTypes();
+        boolean removedUnavailable = view.cart().keySet().removeIf(userListedTypes::contains);
+        if (removedUnavailable) {
+            rebuildStoreItems(view);
+            updateCartSummary(view);
+            player.sendTextMessage("<color=#FFAA66>Items now offered in the User Store were removed from your cart.</color>");
+            if (view.cart().isEmpty()) return;
         }
 
         long total = 0L;
@@ -2759,6 +2911,12 @@ public final class CivicCore extends Plugin implements Listener {
         JournalView journalView = journalViews.get(player.getUID());
         if (journalView != null) {
             handleJournalClick(player, journalView, event.getUIElement().getID());
+            return;
+        }
+
+        UserStoreView userStoreView = userStoreViews.get(player.getUID());
+        if (userStoreView != null) {
+            handleUserStoreClick(player, userStoreView, event.getUIElement().getID());
             return;
         }
         CommandListView commandListView = commandListViews.get(player.getUID());
@@ -2978,6 +3136,9 @@ public final class CivicCore extends Plugin implements Listener {
 
     private record CommandListView(UIElement window, UILabel closeButton) {
     }
+
+    private record UserStoreView(UIElement window, UILabel close, UILabel refresh,
+                                 Map<Integer, Long> listingByButton) { }
 
     private static final class JournalView {
         private final UIElement window;

@@ -11,7 +11,7 @@ The canonical table definitions are maintained in [`schema.sql`](schema.sql),
 which is packaged into the plugin and executed during database initialization.
 
 Database state includes balances, characters and inventory blobs, claims, claim
-administrators, chest locks, clans, memberships, roles, invitations, and
-character journals. Operator-managed
+administrators, chest locks, clans, memberships, roles, invitations, character
+journals, and user-store escrow listings. Operator-managed
 configuration remains in `plugin.properties`, `economy.properties`, and
 `marketplace.json`.

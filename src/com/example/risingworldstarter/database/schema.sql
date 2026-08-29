@@ -91,3 +91,17 @@ CREATE TABLE IF NOT EXISTS journal_pages (
     content TEXT NOT NULL DEFAULT '',
     UNIQUE (section_id, page_number)
 );
+
+CREATE TABLE IF NOT EXISTS user_store_listings (
+    listing_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    seller_key TEXT NOT NULL,
+    seller_name TEXT NOT NULL,
+    item_type INTEGER NOT NULL,
+    item_variant INTEGER NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    price INTEGER NOT NULL CHECK (price > 0),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS user_store_item_idx ON user_store_listings (item_type);
+CREATE INDEX IF NOT EXISTS user_store_seller_idx ON user_store_listings (seller_key);

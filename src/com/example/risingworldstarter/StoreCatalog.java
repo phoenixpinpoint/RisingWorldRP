@@ -81,6 +81,10 @@ final class StoreCatalog {
         return items;
     }
 
+    StoreItem find(short itemId) {
+        return items.stream().filter(item -> item.id() == itemId).findFirst().orElse(null);
+    }
+
     private static boolean isBlocked(String itemName, String category) {
         String normalizedName = itemName.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
         return BLOCKED_ITEM_NAMES.contains(normalizedName)
