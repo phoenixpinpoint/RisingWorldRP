@@ -2,6 +2,7 @@ import groovy.json.JsonSlurper
 
 plugins {
     id 'java'
+    id 'jacoco'
 }
 
 repositories {
@@ -70,6 +71,22 @@ sourceSets {
         resources.srcDirs = ['.', 'src']
         resources.include 'resources/**', 'com/example/risingworldstarter/database/schema.sql'
     }
+    coreTest {
+        java.srcDirs = ['src', 'src/test/java']
+        java.include 'com/example/risingworldstarter/database/**'
+        java.include 'com/example/risingworldstarter/economy/**'
+        java.include 'com/example/risingworldstarter/groups/**'
+        java.include 'com/example/risingworldstarter/journal/**'
+        java.include 'com/example/risingworldstarter/userstore/**'
+        java.include 'com/example/risingworldstarter/tests/**'
+        resources.srcDirs = ['src']
+        resources.include 'com/example/risingworldstarter/database/schema.sql'
+    }
+}
+
+configurations {
+    coreTestImplementation.extendsFrom implementation
+    coreTestRuntimeOnly.extendsFrom runtimeOnly
 }
 
 dependencies {
@@ -79,6 +96,10 @@ dependencies {
     implementation 'org.xerial:sqlite-jdbc:3.53.1.0'
     implementation 'org.slf4j:slf4j-api:2.0.17'
     runtimeOnly 'org.slf4j:slf4j-nop:2.0.17'
+    coreTestImplementation 'org.junit.jupiter:junit-jupiter:5.14.1'
+    coreTestImplementation 'org.mockito:mockito-junit-jupiter:5.21.0'
+    coreTestRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.14.1'
+    coreTestRuntimeOnly 'org.slf4j:slf4j-nop:2.0.17'
 }
 
 java {
@@ -86,14 +107,73 @@ java {
     targetCompatibility = JavaVersion.VERSION_20
 }
 
+jacoco {
+    toolVersion = '0.8.15'
+}
+
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     options.release = 20
     doFirst {
-        if (sdkJar == null) {
+        if (name == 'compileJava' && sdkJar == null) {
             throw new GradleException('Rising World Plugin API not found. Set -PrisingWorldPath="/path/to/RisingWorld", set RISING_WORLD_PATH, or update config/build.config.json for this computer.')
         }
     }
+}
+
+tasks.named('test', Test) {
+    description = 'Runs non-UI unit and SQLite repository tests.'
+    setDependsOn([tasks.named('coreTestClasses')])
+    testClassesDirs = sourceSets.coreTest.output.classesDirs
+    classpath = sourceSets.coreTest.runtimeClasspath
+    useJUnitPlatform()
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        exceptionFormat = 'full'
+    }
+}
+
+tasks.named('test') {
+    jacoco {
+        destinationFile = layout.buildDirectory.file('jacoco/test.exec').get().asFile
+    }
+    finalizedBy tasks.named('jacocoTestReport')
+}
+
+tasks.named('jacocoTestReport', JacocoReport) {
+    dependsOn tasks.named('test')
+    executionData(layout.buildDirectory.file('jacoco/test.exec'))
+    sourceDirectories.setFrom(files('src'))
+    classDirectories.setFrom(sourceSets.coreTest.output.classesDirs.asFileTree.matching {
+        exclude 'com/example/risingworldstarter/tests/**'
+    })
+    reports {
+        html.required = true
+        xml.required = true
+        csv.required = false
+    }
+}
+
+tasks.named('jacocoTestCoverageVerification', JacocoCoverageVerification) {
+    dependsOn tasks.named('test')
+    executionData(layout.buildDirectory.file('jacoco/test.exec'))
+    sourceDirectories.setFrom(files('src'))
+    classDirectories.setFrom(sourceSets.coreTest.output.classesDirs.asFileTree.matching {
+        exclude 'com/example/risingworldstarter/tests/**'
+    })
+    violationRules {
+        rule {
+            limit {
+                counter = 'LINE'
+                value = 'COVEREDRATIO'
+                minimum = 0.90
+            }
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('jacocoTestReport'), tasks.named('jacocoTestCoverageVerification')
 }
 
 tasks.named('jar') {
