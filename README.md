@@ -95,7 +95,10 @@ for configuration, persistence, payday behavior, and API examples.
 
 Every Rising World UID owns up to four character slots. On spawn, the player
 must select an existing character or create one in an empty slot. The selected
-character name becomes the visible in-game player name.
+character name becomes the visible in-game player name and overhead name tag.
+Server administrators additionally see a smaller gray `<profile name>` line
+attached beneath each active character's name; ordinary players never receive
+that account-identifying label.
 
 Use `/characters` (or `/character` or `/chars`) at any time to save the active
 character and reopen the slot selector without disconnecting from the server.
