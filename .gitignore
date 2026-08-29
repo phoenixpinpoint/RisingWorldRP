@@ -28,6 +28,7 @@ replay_pid*
 .gradle-user/
 build/
 build-verify/
+build-coverage/
 
 # Machine-specific editor configuration
 .vscode/
