@@ -71,6 +71,7 @@ import net.risingworld.api.utils.Vector3f;
 import net.risingworld.api.utils.Vector3i;
 import net.risingworld.api.worldelements.Area3D;
 import net.risingworld.api.worldelements.GameObject;
+import net.risingworld.api.worldelements.Text3D;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -126,6 +127,7 @@ public final class CivicCore extends Plugin implements Listener {
     private final Map<String, ClanView> clanViews = new ConcurrentHashMap<>();
     private final Map<String, UserStoreView> userStoreViews = new ConcurrentHashMap<>();
     private final Map<String, CharacterService.CharacterSummary> activeCharacters = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Text3D>> adminProfileNameLabels = new ConcurrentHashMap<>();
     private final Map<String, String> activeClaimIdentities = new ConcurrentHashMap<>();
     private final Map<String, CharacterSelectionView> characterSelectionViews = new ConcurrentHashMap<>();
     private final Map<String, AppearanceView> appearanceViews = new ConcurrentHashMap<>();
@@ -377,6 +379,7 @@ public final class CivicCore extends Plugin implements Listener {
         clanViews.clear();
         userStoreViews.clear();
         activeCharacters.clear();
+        adminProfileNameLabels.clear();
         activeClaimIdentities.clear();
         characterSelectionViews.clear();
         appearanceViews.clear();
@@ -498,6 +501,7 @@ public final class CivicCore extends Plugin implements Listener {
         lastEquippedConstructionIds.remove(event.getPlayer().getUID());
         lastEquippedConstructionSizes.remove(event.getPlayer().getUID());
         autoTrimScheduledAt.remove(event.getPlayer().getUID());
+        refreshAdminProfileNameLabels();
     }
 
     @EventMethod
@@ -2380,6 +2384,9 @@ public final class CivicCore extends Plugin implements Listener {
             else activeClaimIdentities.put(playerUid, previousClaimIdentity);
             throw exception;
         }
+        // Reapply after the character data is loaded. The delayed update also
+        // refreshes clients whose native overhead name tag was created during spawn.
+        player.setName(character.name());
         economy.createAccount(character.economyKey(), economySettings.defaultBalance());
         CharacterSelectionView view = characterSelectionViews.remove(playerUid);
         if (view != null) player.removeUIElement(view.window());
@@ -2387,6 +2394,14 @@ public final class CivicCore extends Plugin implements Listener {
         player.setMouseCursorVisible(false);
         showBalance(player);
         showWorldClock(player);
+        refreshAdminProfileNameLabels();
+        executeDelayed(0.35f, () -> {
+            CharacterService.CharacterSummary active = activeCharacters.get(playerUid);
+            if (player.isSpawned() && active != null && active.id().equals(character.id())) {
+                player.setName(character.name());
+                refreshAdminProfileNameLabels();
+            }
+        });
         player.sendTextMessage("<color=#77FF99>Now playing as " + character.name() + ".</color>");
         debug("Profile " + character.profileName() + " (" + player.getUID() + ") selected character "
                 + character.name() + " [slot " + character.slot() + ", claim identity "
@@ -2397,6 +2412,46 @@ public final class CivicCore extends Plugin implements Listener {
         CharacterService.CharacterSummary character = activeCharacters.get(player.getUID());
         if (character == null) throw new IllegalStateException("No active character for " + player.getUID());
         return character.economyKey();
+    }
+
+    /**
+     * Adds a private profile-name line for administrator viewers. The game's
+     * native overhead label remains the active character name for everyone.
+     */
+    private void refreshAdminProfileNameLabels() {
+        Map<String, Player> connected = new LinkedHashMap<>();
+        for (Player player : Server.getAllPlayers()) connected.put(player.getUID(), player);
+
+        for (Map.Entry<String, Map<String, Text3D>> viewerEntry
+                : new ArrayList<>(adminProfileNameLabels.entrySet())) {
+            Player viewer = connected.get(viewerEntry.getKey());
+            if (viewer != null) {
+                for (Text3D label : viewerEntry.getValue().values()) {
+                    try { viewer.removeGameObject(label); }
+                    catch (RuntimeException ignored) { }
+                }
+            }
+        }
+        adminProfileNameLabels.clear();
+
+        for (Player viewer : connected.values()) {
+            if (!viewer.isSpawned() || !viewer.isAdmin()) continue;
+            Map<String, Text3D> labels = new ConcurrentHashMap<>();
+            for (Player target : connected.values()) {
+                CharacterService.CharacterSummary character = activeCharacters.get(target.getUID());
+                if (!target.isSpawned() || character == null) continue;
+                Text3D profileLabel = new Text3D("<" + character.profileName() + ">");
+                profileLabel.setFontSize(0.18f);
+                profileLabel.setFontColor((int) 0xB8B8B8FFL);
+                profileLabel.setBillboard(true);
+                profileLabel.setAlwaysVisible(false);
+                profileLabel.attachTo(target, GameObject.AttachTarget.Head);
+                profileLabel.setLocalPosition(0f, 0.34f, 0f);
+                viewer.addGameObject(profileLabel);
+                labels.put(target.getUID(), profileLabel);
+            }
+            if (!labels.isEmpty()) adminProfileNameLabels.put(viewer.getUID(), labels);
+        }
     }
 
     private String activeClaimIdentity(Player player) {
