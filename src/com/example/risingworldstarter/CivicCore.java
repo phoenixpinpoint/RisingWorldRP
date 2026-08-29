@@ -93,7 +93,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Minimal entry point for a Rising World (Unity version) plugin.
  */
 public final class CivicCore extends Plugin implements Listener {
-    private static final int CLAIM_OVERVIEW_RADIUS = 10;
+    private static final int CLAIM_OVERVIEW_RADIUS = 5;
     private static final int[] SKIN_COLORS = {
             0xF1C27D, 0xE0AC69, 0xC68642, 0xA66A3F, 0x8D5524, 0x5C3317
     };

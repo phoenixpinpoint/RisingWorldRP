@@ -19,7 +19,7 @@ database. Other plugins can access claims through `CivicCore.getClaimService()`.
 
 - `/claim` claims the current chunk.
 - `/chunk` reports and visualizes the current chunk and owner.
-- `/claims` lists personal claims and toggles a 21-by-21 chunk ownership overview
+- `/claims` lists personal claims and toggles an 11-by-11 chunk ownership overview
   centered on the active character's current chunk.
 - `/unclaim` releases the current chunk.
 - `/claimadmin add <online-player>` adds a claim administrator.
