@@ -53,6 +53,8 @@ import net.risingworld.api.objects.Area;
 import net.risingworld.api.objects.Item;
 import net.risingworld.api.objects.Inventory;
 import net.risingworld.api.objects.Skin;
+import net.risingworld.api.objects.world.Chunk;
+import net.risingworld.api.objects.world.ConstructionElement;
 import net.risingworld.api.ui.UIElement;
 import net.risingworld.api.ui.UILabel;
 import net.risingworld.api.ui.MessageBoxButtons;
@@ -95,6 +97,10 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class CivicCore extends Plugin implements Listener {
     private static final int CLAIM_OVERVIEW_RADIUS = 5;
+    private static final float SMALL_CONSTRUCTION_MAX_SIZE = 0.5f;
+    private static final float CONSTRUCTION_HIGHLIGHT_MIN_SIZE = 0.35f;
+    private static final float CONSTRUCTION_SELECTION_DISTANCE = 12f;
+    private static final int MAX_CONSTRUCTION_HIGHLIGHTS = 250;
     private static final int[] SKIN_COLORS = {
             0xF1C27D, 0xE0AC69, 0xC68642, 0xA66A3F, 0x8D5524, 0x5C3317
     };
@@ -119,6 +125,11 @@ public final class CivicCore extends Plugin implements Listener {
     private final Map<String, List<Area3D>> claimVisuals = new ConcurrentHashMap<>();
     private final Map<String, String> visualModes = new ConcurrentHashMap<>();
     private final Map<String, Float> visualHeights = new ConcurrentHashMap<>();
+    private final Map<String, List<Area3D>> constructionHighlights = new ConcurrentHashMap<>();
+    private final Map<String, String> constructionHighlightChunks = new ConcurrentHashMap<>();
+    private final Map<String, Map<Long, ConstructionElement>> highlightedConstructions = new ConcurrentHashMap<>();
+    private final Map<String, Map<Long, Area3D>> highlightedConstructionVisuals = new ConcurrentHashMap<>();
+    private final Map<String, Set<Long>> pendingHighlightedRemovals = new ConcurrentHashMap<>();
     private final Map<String, StoreView> storeViews = new ConcurrentHashMap<>();
     private final Map<String, AdminView> adminViews = new ConcurrentHashMap<>();
     private final Map<String, AboutView> aboutViews = new ConcurrentHashMap<>();
@@ -365,6 +376,11 @@ public final class CivicCore extends Plugin implements Listener {
         claimVisuals.clear();
         visualModes.clear();
         visualHeights.clear();
+        constructionHighlights.clear();
+        constructionHighlightChunks.clear();
+        highlightedConstructions.clear();
+        highlightedConstructionVisuals.clear();
+        pendingHighlightedRemovals.clear();
         storeViews.clear();
         adminViews.clear();
         aboutViews.clear();
@@ -483,6 +499,11 @@ public final class CivicCore extends Plugin implements Listener {
         claimVisuals.remove(event.getPlayer().getUID());
         visualModes.remove(event.getPlayer().getUID());
         visualHeights.remove(event.getPlayer().getUID());
+        constructionHighlights.remove(event.getPlayer().getUID());
+        constructionHighlightChunks.remove(event.getPlayer().getUID());
+        highlightedConstructions.remove(event.getPlayer().getUID());
+        highlightedConstructionVisuals.remove(event.getPlayer().getUID());
+        pendingHighlightedRemovals.remove(event.getPlayer().getUID());
         storeViews.remove(event.getPlayer().getUID());
         adminViews.remove(event.getPlayer().getUID());
         aboutViews.remove(event.getPlayer().getUID());
@@ -806,6 +827,14 @@ public final class CivicCore extends Plugin implements Listener {
     @EventMethod
     public void onPlayerChangePosition(PlayerChangePositionEvent event) {
         Player player = event.getPlayer();
+        if (constructionHighlightChunks.containsKey(player.getUID())) {
+            Vector3i currentChunk = Utils.ChunkUtils.getChunkPosition(event.getPosition());
+            String chunkKey = currentChunk.x + "," + currentChunk.z;
+            if (!chunkKey.equals(constructionHighlightChunks.get(player.getUID()))) {
+                refreshConstructionHighlights(player, currentChunk, false);
+            }
+        }
+
         List<Area3D> visuals = claimVisuals.get(player.getUID());
         if (visuals == null || visuals.isEmpty()) {
             return;
@@ -890,6 +919,12 @@ public final class CivicCore extends Plugin implements Listener {
                 (player, parts) -> showCommands(player));
         registerCommand("General", "/about", "Show CivicCore information and version.", false, List.of(),
                 (player, parts) -> showAbout(player));
+        registerCommand("Building", "/highlightblocks", "Toggle outlines around small construction pieces in your current chunk.",
+                true, List.of("/highlightpieces"), (player, parts) -> toggleConstructionHighlights(player));
+        registerCommand("Building", "/removehighlighted", "Remove the highlighted construction piece under your crosshair.",
+                true, List.of("/removehighlight"), (player, parts) -> removeHighlightedConstruction(player));
+        registerCommand("Building", "/removeallhighlighted", "Remove all highlighted construction pieces in your current chunk.",
+                true, List.of("/removeallhighlights"), (player, parts) -> removeAllHighlightedConstructions(player));
         registerCommand("Character", "/journal", "Open your character journal.", true, List.of("/notes"),
                 (player, parts) -> toggleJournal(player));
         registerCommand("Character", "/characters", "Open the character selector.", true,
@@ -1957,6 +1992,266 @@ public final class CivicCore extends Plugin implements Listener {
         visualModes.put(player.getUID(), requestedMode);
         visualHeights.put(player.getUID(), groundY);
         player.addGameObject(visual);
+    }
+
+    private void toggleConstructionHighlights(Player player) {
+        if (constructionHighlightChunks.remove(player.getUID()) != null) {
+            clearConstructionHighlightVisuals(player);
+            pendingHighlightedRemovals.remove(player.getUID());
+            player.sendTextMessage("<color=#AAAAAA>Small construction highlights hidden.</color>");
+            return;
+        }
+        refreshConstructionHighlights(player, player.getChunkPosition(), true);
+    }
+
+    private void refreshConstructionHighlights(Player player, Vector3i chunkPosition, boolean announce) {
+        clearConstructionHighlightVisuals(player);
+        String chunkKey = chunkPosition.x + "," + chunkPosition.z;
+        String previousChunk = constructionHighlightChunks.put(player.getUID(), chunkKey);
+        if (previousChunk != null && !previousChunk.equals(chunkKey)) {
+            pendingHighlightedRemovals.remove(player.getUID());
+        }
+        Set<Long> pendingRemovals = pendingHighlightedRemovals.getOrDefault(player.getUID(), Set.of());
+        List<Area3D> highlights = new ArrayList<>();
+        Map<Long, ConstructionElement> highlightedElements = new LinkedHashMap<>();
+        Map<Long, Area3D> highlightedVisuals = new LinkedHashMap<>();
+        Chunk chunk = World.getChunk(chunkPosition.x, chunkPosition.z);
+        ConstructionElement[] elements = chunk == null ? null : chunk.getAllConstructionElements();
+        if (elements != null) {
+            for (ConstructionElement element : elements) {
+                if (highlights.size() >= MAX_CONSTRUCTION_HIGHLIGHTS) break;
+                if (element != null && pendingRemovals.contains(element.getGlobalID())) continue;
+                Vector3f position = element == null ? null : element.getWorldPosition();
+                Vector3f size = getConstructionPhysicalSize(element);
+                if (position == null || !isSmallConstruction(size)) continue;
+
+                float width = Math.max(Math.abs(size.x), CONSTRUCTION_HIGHLIGHT_MIN_SIZE);
+                float height = Math.max(Math.abs(size.y), CONSTRUCTION_HIGHLIGHT_MIN_SIZE);
+                float depth = Math.max(Math.abs(size.z), CONSTRUCTION_HIGHLIGHT_MIN_SIZE);
+                Vector3f start = new Vector3f(position.x - width / 2f, position.y - height / 2f,
+                        position.z - depth / 2f);
+                Vector3f end = new Vector3f(position.x + width / 2f, position.y + height / 2f,
+                        position.z + depth / 2f);
+                Area3D highlight = new Area3D(new Area(start, end));
+                highlight.attachTo((Player) null, GameObject.AttachTarget.Root);
+                highlight.setAlwaysVisible(true);
+                highlight.setFrameVisible(true);
+                highlight.setColor(1f, 0.85f, 0.1f, 0.16f);
+                highlight.setFrameColor(1f, 0.92f, 0.15f, 1f);
+                highlights.add(highlight);
+                highlightedElements.put(element.getGlobalID(), element);
+                highlightedVisuals.put(element.getGlobalID(), highlight);
+                player.addGameObject(highlight);
+            }
+        }
+
+        if (!highlights.isEmpty()) constructionHighlights.put(player.getUID(), highlights);
+        if (!highlightedElements.isEmpty()) highlightedConstructions.put(player.getUID(), highlightedElements);
+        if (!highlightedVisuals.isEmpty()) highlightedConstructionVisuals.put(player.getUID(), highlightedVisuals);
+        if (!announce) return;
+        String limitMessage = highlights.size() == MAX_CONSTRUCTION_HIGHLIGHTS
+                ? " (display limit reached)" : "";
+        player.sendTextMessage("<color=#E8C547>Highlighted " + highlights.size()
+                + " small construction piece(s) in chunk " + chunkKey + limitMessage + ".</color>");
+        player.sendTextMessage("<color=#AAAAAA>Highlights will follow you between chunks. Run /highlightblocks again to hide them.</color>");
+    }
+
+    private void removeHighlightedConstruction(Player player) {
+        if (!constructionHighlightChunks.containsKey(player.getUID())) {
+            player.sendTextMessage("<color=#FF7777>Enable /highlightblocks before removing a highlighted piece.</color>");
+            return;
+        }
+        Map<Long, ConstructionElement> highlighted = highlightedConstructions.get(player.getUID());
+        if (highlighted == null || highlighted.isEmpty()) {
+            player.sendTextMessage("<color=#AAAAAA>There are no highlighted construction pieces in this chunk.</color>");
+            return;
+        }
+
+        ConstructionElement element = findAimedHighlightedConstruction(player, highlighted.values());
+        if (element == null) {
+            player.sendTextMessage("<color=#FF7777>Aim at a highlighted box within 12 meters and try again.</color>");
+            return;
+        }
+
+        int chunkX = element.getChunkPositionX();
+        int chunkZ = element.getChunkPositionZ();
+        Claim claim = claims.getClaim(chunkX, chunkZ).orElse(null);
+        if (claim != null && !canAccessOwner(activeClaimIdentity(player), claim.ownerUid())
+                && !(isClaimAdmin(player) && claimAdminOverrideEnabled)) {
+            player.sendTextMessage("<color=#FF7777>This chunk is protected by " + claim.ownerName() + ".</color>");
+            return;
+        }
+
+        long globalId = element.getGlobalID();
+        pendingHighlightedRemovals.computeIfAbsent(player.getUID(), ignored -> ConcurrentHashMap.newKeySet())
+                .add(globalId);
+        highlighted.remove(globalId);
+        Map<Long, Area3D> visualsById = highlightedConstructionVisuals.get(player.getUID());
+        Area3D selectedVisual = visualsById == null ? null : visualsById.remove(globalId);
+        List<Area3D> currentVisuals = constructionHighlights.get(player.getUID());
+        if (selectedVisual != null) {
+            if (currentVisuals != null) currentVisuals.remove(selectedVisual);
+            player.removeGameObject(selectedVisual);
+        }
+        ConstructionRemoval removal = ConstructionRemoval.from(element);
+        requestConstructionRemoval(removal);
+        player.sendTextMessage("<color=#E8C547>Removing highlighted construction piece " + globalId
+                + "; verifying world state...</color>");
+        executeDelayed(0.75f, () -> verifyConstructionRemovals(player, List.of(removal), false));
+    }
+
+    private void removeAllHighlightedConstructions(Player player) {
+        if (!constructionHighlightChunks.containsKey(player.getUID())) {
+            player.sendTextMessage("<color=#FF7777>Enable /highlightblocks before removing highlighted pieces.</color>");
+            return;
+        }
+        Vector3i currentChunk = player.getChunkPosition();
+        Claim claim = claims.getClaim(currentChunk.x, currentChunk.z).orElse(null);
+        if (claim != null && !canAccessOwner(activeClaimIdentity(player), claim.ownerUid())
+                && !(isClaimAdmin(player) && claimAdminOverrideEnabled)) {
+            player.sendTextMessage("<color=#FF7777>This chunk is protected by " + claim.ownerName() + ".</color>");
+            return;
+        }
+
+        Chunk chunk = World.getChunk(currentChunk.x, currentChunk.z);
+        ConstructionElement[] chunkElements = chunk == null ? null : chunk.getAllConstructionElements();
+        List<ConstructionElement> removable = chunkElements == null ? List.of() : java.util.Arrays.stream(chunkElements)
+                .filter(element -> element != null && element.isValid()
+                        && isSmallConstruction(getConstructionPhysicalSize(element)))
+                .toList();
+        if (removable.isEmpty()) {
+            refreshConstructionHighlights(player, currentChunk, false);
+            player.sendTextMessage("<color=#AAAAAA>There are no valid highlighted pieces left to remove.</color>");
+            return;
+        }
+
+        Set<Long> pending = pendingHighlightedRemovals.computeIfAbsent(
+                player.getUID(), ignored -> ConcurrentHashMap.newKeySet());
+        for (ConstructionElement element : removable) pending.add(element.getGlobalID());
+        clearConstructionHighlightVisuals(player);
+        List<ConstructionRemoval> removals = removable.stream().map(ConstructionRemoval::from).toList();
+        for (ConstructionRemoval removal : removals) requestConstructionRemoval(removal);
+        player.sendTextMessage("<color=#E8C547>Removing " + removals.size()
+                + " highlighted construction piece(s); verifying world state...</color>");
+        executeDelayed(0.75f, () -> verifyConstructionRemovals(player, removals, false));
+    }
+
+    private static void requestConstructionRemoval(ConstructionRemoval removal) {
+        World.removeConstructionElement(removal.globalId(), removal.chunkX(), removal.chunkY(), removal.chunkZ(), true);
+    }
+
+    private void verifyConstructionRemovals(Player player, List<ConstructionRemoval> removals, boolean retried) {
+        if (!player.isSpawned()) return;
+        List<ConstructionRemoval> remaining = removals.stream()
+                .filter(CivicCore::constructionStillExists)
+                .toList();
+        if (!remaining.isEmpty() && !retried) {
+            for (ConstructionRemoval removal : remaining) requestConstructionRemoval(removal);
+            executeDelayed(0.75f, () -> verifyConstructionRemovals(player, removals, true));
+            return;
+        }
+
+        int removed = removals.size() - remaining.size();
+        Set<Long> pending = pendingHighlightedRemovals.get(player.getUID());
+        if (pending != null) {
+            for (ConstructionRemoval removal : remaining) pending.remove(removal.globalId());
+        }
+        if (remaining.isEmpty()) {
+            player.sendTextMessage("<color=#77FF99>Verified removal of " + removed
+                    + " construction piece(s).</color>");
+        } else {
+            player.sendTextMessage("<color=#FF7777>Verified " + removed + " removal(s), but "
+                    + remaining.size() + " piece(s) are still present. No fallback changes were applied.</color>");
+            debug("Construction removal verification failed for IDs "
+                    + remaining.stream().map(removal -> Long.toString(removal.globalId())).toList());
+        }
+        if (constructionHighlightChunks.containsKey(player.getUID())) {
+            refreshConstructionHighlights(player, player.getChunkPosition(), false);
+        }
+    }
+
+    private static boolean constructionStillExists(ConstructionRemoval removal) {
+        ConstructionElement element = World.getConstructionElement(
+                removal.globalId(), removal.chunkX(), removal.chunkY(), removal.chunkZ());
+        return element != null && element.isValid();
+    }
+
+    private static ConstructionElement findAimedHighlightedConstruction(
+            Player player, Iterable<ConstructionElement> elements) {
+        Vector3f origin = player.getViewPosition();
+        Vector3f viewDirection = player.getViewDirection();
+        if (origin == null || viewDirection == null || viewDirection.lengthSquared() < 0.000001f) return null;
+        Vector3f direction = viewDirection.normalize();
+        ConstructionElement nearest = null;
+        float nearestDistance = CONSTRUCTION_SELECTION_DISTANCE;
+        for (ConstructionElement element : elements) {
+            Vector3f position = element == null ? null : element.getWorldPosition();
+            Vector3f size = getConstructionPhysicalSize(element);
+            if (position == null || !isSmallConstruction(size)) continue;
+            float halfWidth = Math.max(Math.abs(size.x), CONSTRUCTION_HIGHLIGHT_MIN_SIZE) / 2f;
+            float halfHeight = Math.max(Math.abs(size.y), CONSTRUCTION_HIGHLIGHT_MIN_SIZE) / 2f;
+            float halfDepth = Math.max(Math.abs(size.z), CONSTRUCTION_HIGHLIGHT_MIN_SIZE) / 2f;
+            float distance = rayBoxDistance(origin, direction,
+                    position.x - halfWidth, position.y - halfHeight, position.z - halfDepth,
+                    position.x + halfWidth, position.y + halfHeight, position.z + halfDepth);
+            if (distance >= 0f && distance <= nearestDistance) {
+                nearestDistance = distance;
+                nearest = element;
+            }
+        }
+        return nearest;
+    }
+
+    private static float rayBoxDistance(Vector3f origin, Vector3f direction,
+                                        float minX, float minY, float minZ,
+                                        float maxX, float maxY, float maxZ) {
+        float near = 0f;
+        float far = CONSTRUCTION_SELECTION_DISTANCE;
+        float[] origins = {origin.x, origin.y, origin.z};
+        float[] directions = {direction.x, direction.y, direction.z};
+        float[] minimums = {minX, minY, minZ};
+        float[] maximums = {maxX, maxY, maxZ};
+        for (int axis = 0; axis < 3; axis++) {
+            if (Math.abs(directions[axis]) < 0.000001f) {
+                if (origins[axis] < minimums[axis] || origins[axis] > maximums[axis]) return -1f;
+                continue;
+            }
+            float first = (minimums[axis] - origins[axis]) / directions[axis];
+            float second = (maximums[axis] - origins[axis]) / directions[axis];
+            if (first > second) {
+                float swap = first;
+                first = second;
+                second = swap;
+            }
+            near = Math.max(near, first);
+            far = Math.min(far, second);
+            if (near > far) return -1f;
+        }
+        return near;
+    }
+
+    private static Vector3f getConstructionPhysicalSize(ConstructionElement element) {
+        if (element == null || !element.isValid()) return null;
+        Vector3f scale = element.getScale();
+        if (scale == null) return null;
+        Constructions.ConstructionDefinition definition = Definitions.getConstructionDefinition(element.getTypeID());
+        if (definition == null || definition.startsize == null) return scale.copy();
+        return definition.startsize.mult(scale);
+    }
+
+    private static boolean isSmallConstruction(Vector3f size) {
+        return size != null
+                && Math.abs(size.x) > 0f && Math.abs(size.x) <= SMALL_CONSTRUCTION_MAX_SIZE
+                && Math.abs(size.y) > 0f && Math.abs(size.y) <= SMALL_CONSTRUCTION_MAX_SIZE
+                && Math.abs(size.z) > 0f && Math.abs(size.z) <= SMALL_CONSTRUCTION_MAX_SIZE;
+    }
+
+    private void clearConstructionHighlightVisuals(Player player) {
+        List<Area3D> highlights = constructionHighlights.remove(player.getUID());
+        highlightedConstructions.remove(player.getUID());
+        highlightedConstructionVisuals.remove(player.getUID());
+        if (highlights == null) return;
+        for (Area3D highlight : highlights) player.removeGameObject(highlight);
     }
 
     private Area3D createChunkVisual(int chunkX, int chunkZ, float groundY,
@@ -3527,6 +3822,13 @@ public final class CivicCore extends Plugin implements Listener {
                             Map<Integer, ClanDialogAction> actions) { }
 
     private record ClanDialogAction(String type, String targetKey) { }
+
+    private record ConstructionRemoval(long globalId, int chunkX, int chunkY, int chunkZ) {
+        private static ConstructionRemoval from(ConstructionElement element) {
+            return new ConstructionRemoval(element.getGlobalID(), element.getChunkPositionX(),
+                    element.getChunkPositionY(), element.getChunkPositionZ());
+        }
+    }
 
     private static final class JournalView {
         private final UIElement window;
