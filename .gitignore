@@ -30,6 +30,8 @@ build/
 build-verify/
 build-coverage/
 
+/bin
+
 # Machine-specific editor configuration
 .vscode/
 
