@@ -130,6 +130,7 @@ public final class CivicCore extends Plugin implements Listener {
     private final Map<String, Map<Long, ConstructionElement>> highlightedConstructions = new ConcurrentHashMap<>();
     private final Map<String, Map<Long, Area3D>> highlightedConstructionVisuals = new ConcurrentHashMap<>();
     private final Map<String, Set<Long>> pendingHighlightedRemovals = new ConcurrentHashMap<>();
+    private final Map<String, Map<Long, PreparedConstructionRemoval>> preparedConstructionRemovals = new ConcurrentHashMap<>();
     private final Map<String, StoreView> storeViews = new ConcurrentHashMap<>();
     private final Map<String, AdminView> adminViews = new ConcurrentHashMap<>();
     private final Map<String, AboutView> aboutViews = new ConcurrentHashMap<>();
@@ -381,6 +382,7 @@ public final class CivicCore extends Plugin implements Listener {
         highlightedConstructions.clear();
         highlightedConstructionVisuals.clear();
         pendingHighlightedRemovals.clear();
+        restoreAllPreparedConstructionRemovals();
         storeViews.clear();
         adminViews.clear();
         aboutViews.clear();
@@ -499,6 +501,7 @@ public final class CivicCore extends Plugin implements Listener {
         claimVisuals.remove(event.getPlayer().getUID());
         visualModes.remove(event.getPlayer().getUID());
         visualHeights.remove(event.getPlayer().getUID());
+        restorePreparedConstructionRemovals(event.getPlayer().getUID());
         constructionHighlights.remove(event.getPlayer().getUID());
         constructionHighlightChunks.remove(event.getPlayer().getUID());
         highlightedConstructions.remove(event.getPlayer().getUID());
@@ -573,8 +576,14 @@ public final class CivicCore extends Plugin implements Listener {
             }
         }
     }
-    @EventMethod public void onDestroyConstruction(PlayerDestroyConstructionEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
-    @EventMethod public void onRemoveConstruction(PlayerRemoveConstructionEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onDestroyConstruction(PlayerDestroyConstructionEvent event) {
+        protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        if (!event.isCancelled()) completePreparedConstructionRemoval(event.getPlayer(), event.getConstructionElement());
+    }
+    @EventMethod public void onRemoveConstruction(PlayerRemoveConstructionEvent event) {
+        protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        if (!event.isCancelled()) completePreparedConstructionRemoval(event.getPlayer(), event.getConstructionElement());
+    }
     @EventMethod public void onCreativeRemoveConstruction(PlayerCreativeRemoveConstructionEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
     @EventMethod public void onEditConstruction(PlayerEditConstructionEvent event) {
         protect(event, event.getChunkPositionX(), event.getChunkPositionZ());
@@ -920,10 +929,12 @@ public final class CivicCore extends Plugin implements Listener {
         registerCommand("General", "/about", "Show CivicCore information and version.", false, List.of(),
                 (player, parts) -> showAbout(player));
         registerCommand("Building", "/highlightblocks", "Toggle outlines around small construction pieces in your current chunk.",
-                true, List.of("/highlightpieces"), (player, parts) -> toggleConstructionHighlights(player));
-        registerCommand("Building", "/removehighlighted", "Remove the highlighted construction piece under your crosshair.",
-                true, List.of("/removehighlight"), (player, parts) -> removeHighlightedConstruction(player));
-        registerCommand("Building", "/removeallhighlighted", "Remove all highlighted construction pieces in your current chunk.",
+                true, List.of("/highlightpieces", "/highlightselected", "/blocks"),
+                (player, parts) -> toggleConstructionHighlights(player));
+        registerCommand("Building", "/removehighlighted", "Prepare the highlighted construction piece under your crosshair for a sledgehammer hit.",
+                true, List.of("/removehighlight", "/removehighlightedblock"),
+                (player, parts) -> removeHighlightedConstruction(player));
+        registerCommand("Building", "/removeallhighlighted", "Prepare all highlighted construction pieces in your current chunk for sledgehammer removal.",
                 true, List.of("/removeallhighlights"), (player, parts) -> removeAllHighlightedConstructions(player));
         registerCommand("Character", "/journal", "Open your character journal.", true, List.of("/notes"),
                 (player, parts) -> toggleJournal(player));
@@ -1996,6 +2007,7 @@ public final class CivicCore extends Plugin implements Listener {
 
     private void toggleConstructionHighlights(Player player) {
         if (constructionHighlightChunks.remove(player.getUID()) != null) {
+            restorePreparedConstructionRemovals(player.getUID());
             clearConstructionHighlightVisuals(player);
             pendingHighlightedRemovals.remove(player.getUID());
             player.sendTextMessage("<color=#AAAAAA>Small construction highlights hidden.</color>");
@@ -2005,12 +2017,14 @@ public final class CivicCore extends Plugin implements Listener {
     }
 
     private void refreshConstructionHighlights(Player player, Vector3i chunkPosition, boolean announce) {
-        clearConstructionHighlightVisuals(player);
         String chunkKey = chunkPosition.x + "," + chunkPosition.z;
-        String previousChunk = constructionHighlightChunks.put(player.getUID(), chunkKey);
+        String previousChunk = constructionHighlightChunks.get(player.getUID());
         if (previousChunk != null && !previousChunk.equals(chunkKey)) {
+            restorePreparedConstructionRemovals(player.getUID());
             pendingHighlightedRemovals.remove(player.getUID());
         }
+        clearConstructionHighlightVisuals(player);
+        constructionHighlightChunks.put(player.getUID(), chunkKey);
         Set<Long> pendingRemovals = pendingHighlightedRemovals.getOrDefault(player.getUID(), Set.of());
         List<Area3D> highlights = new ArrayList<>();
         Map<Long, ConstructionElement> highlightedElements = new LinkedHashMap<>();
@@ -2093,11 +2107,16 @@ public final class CivicCore extends Plugin implements Listener {
             if (currentVisuals != null) currentVisuals.remove(selectedVisual);
             player.removeGameObject(selectedVisual);
         }
-        ConstructionRemoval removal = ConstructionRemoval.from(element);
-        requestConstructionRemoval(removal);
-        player.sendTextMessage("<color=#E8C547>Removing highlighted construction piece " + globalId
-                + "; verifying world state...</color>");
-        executeDelayed(0.75f, () -> verifyConstructionRemovals(player, List.of(removal), false));
+        Vector3f originalScale = element.getScale();
+        if (originalScale == null) {
+            player.sendTextMessage("<color=#FF7777>Could not read that construction piece's scale.</color>");
+            return;
+        }
+        preparedConstructionRemovals.computeIfAbsent(player.getUID(), ignored -> new ConcurrentHashMap<>())
+                .putIfAbsent(globalId, new PreparedConstructionRemoval(element, originalScale.copy()));
+        element.setScale(getHammerTargetScale(element, originalScale));
+        player.sendTextMessage("<color=#77FF99>Piece " + globalId
+                + " is ready. Hit the enlarged piece with the sledgehammer to remove it.</color>");
     }
 
     private void removeAllHighlightedConstructions(Player player) {
@@ -2113,31 +2132,91 @@ public final class CivicCore extends Plugin implements Listener {
             return;
         }
 
-        Chunk chunk = World.getChunk(currentChunk.x, currentChunk.z);
-        ConstructionElement[] chunkElements = chunk == null ? null : chunk.getAllConstructionElements();
-        List<ConstructionElement> removable = chunkElements == null ? List.of() : java.util.Arrays.stream(chunkElements)
-                .filter(element -> element != null && element.isValid()
-                        && isSmallConstruction(getConstructionPhysicalSize(element)))
-                .toList();
-        if (removable.isEmpty()) {
-            refreshConstructionHighlights(player, currentChunk, false);
-            player.sendTextMessage("<color=#AAAAAA>There are no valid highlighted pieces left to remove.</color>");
+        Map<Long, ConstructionElement> highlighted = highlightedConstructions.get(player.getUID());
+        if (highlighted == null || highlighted.isEmpty()) {
+            player.sendTextMessage("<color=#AAAAAA>There are no highlighted construction pieces in this chunk.</color>");
             return;
         }
 
+        Map<Long, PreparedConstructionRemoval> prepared = preparedConstructionRemovals.computeIfAbsent(
+                player.getUID(), ignored -> new ConcurrentHashMap<>());
         Set<Long> pending = pendingHighlightedRemovals.computeIfAbsent(
                 player.getUID(), ignored -> ConcurrentHashMap.newKeySet());
-        for (ConstructionElement element : removable) pending.add(element.getGlobalID());
+        int preparedCount = 0;
+        for (ConstructionElement element : new ArrayList<>(highlighted.values())) {
+            if (element == null || !element.isValid()) continue;
+            Vector3f originalScale = element.getScale();
+            if (originalScale == null) continue;
+            long globalId = element.getGlobalID();
+            if (prepared.putIfAbsent(globalId,
+                    new PreparedConstructionRemoval(element, originalScale.copy())) != null) continue;
+            pending.add(globalId);
+            element.setScale(getHammerTargetScale(element, originalScale));
+            preparedCount++;
+        }
+
         clearConstructionHighlightVisuals(player);
-        List<ConstructionRemoval> removals = removable.stream().map(ConstructionRemoval::from).toList();
-        for (ConstructionRemoval removal : removals) requestConstructionRemoval(removal);
-        player.sendTextMessage("<color=#E8C547>Removing " + removals.size()
-                + " highlighted construction piece(s); verifying world state...</color>");
-        executeDelayed(0.75f, () -> verifyConstructionRemovals(player, removals, false));
+        if (preparedCount == 0) {
+            player.sendTextMessage("<color=#AAAAAA>No additional construction pieces could be prepared.</color>");
+            return;
+        }
+        player.sendTextMessage("<color=#77FF99>Prepared " + preparedCount
+                + " small construction piece(s). Hit the enlarged pieces with the sledgehammer to remove them.</color>");
+    }
+
+    private static Vector3f getHammerTargetScale(ConstructionElement element, Vector3f originalScale) {
+        Constructions.ConstructionDefinition definition = Definitions.getConstructionDefinition(element.getTypeID());
+        Vector3f base = definition == null ? null : definition.startsize;
+        if (base == null) return new Vector3f(
+                Math.max(Math.abs(originalScale.x), CONSTRUCTION_HIGHLIGHT_MIN_SIZE),
+                Math.max(Math.abs(originalScale.y), CONSTRUCTION_HIGHLIGHT_MIN_SIZE),
+                Math.max(Math.abs(originalScale.z), CONSTRUCTION_HIGHLIGHT_MIN_SIZE));
+        return new Vector3f(
+                scaleForHammer(originalScale.x, base.x),
+                scaleForHammer(originalScale.y, base.y),
+                scaleForHammer(originalScale.z, base.z));
+    }
+
+    private static float scaleForHammer(float original, float baseSize) {
+        float sign = original < 0f ? -1f : 1f;
+        float required = Math.abs(baseSize) < 0.000001f
+                ? CONSTRUCTION_HIGHLIGHT_MIN_SIZE
+                : CONSTRUCTION_HIGHLIGHT_MIN_SIZE / Math.abs(baseSize);
+        return sign * Math.max(Math.abs(original), required);
+    }
+
+    private void completePreparedConstructionRemoval(Player player, ConstructionElement element) {
+        if (element == null) return;
+        long globalId = element.getGlobalID();
+        Map<Long, PreparedConstructionRemoval> prepared = preparedConstructionRemovals.get(player.getUID());
+        if (prepared == null || prepared.remove(globalId) == null) return;
+        if (prepared.isEmpty()) preparedConstructionRemovals.remove(player.getUID());
+        Set<Long> pending = pendingHighlightedRemovals.get(player.getUID());
+        if (pending != null) pending.remove(globalId);
+        executeDelayed(0.25f, () -> {
+            if (player.isSpawned() && constructionHighlightChunks.containsKey(player.getUID())) {
+                refreshConstructionHighlights(player, player.getChunkPosition(), false);
+                player.sendTextMessage("<color=#77FF99>Removed prepared construction piece.</color>");
+            }
+        });
+    }
+
+    private void restorePreparedConstructionRemovals(String playerUid) {
+        Map<Long, PreparedConstructionRemoval> prepared = preparedConstructionRemovals.remove(playerUid);
+        if (prepared == null) return;
+        for (PreparedConstructionRemoval removal : prepared.values()) removal.restore();
+    }
+
+    private void restoreAllPreparedConstructionRemovals() {
+        for (Map<Long, PreparedConstructionRemoval> prepared : preparedConstructionRemovals.values()) {
+            for (PreparedConstructionRemoval removal : prepared.values()) removal.restore();
+        }
+        preparedConstructionRemovals.clear();
     }
 
     private static void requestConstructionRemoval(ConstructionRemoval removal) {
-        World.removeConstructionElement(removal.globalId(), removal.chunkX(), removal.chunkY(), removal.chunkZ(), true);
+        World.removeConstructionElement(
+                removal.globalId(), removal.chunkX(), removal.chunkY(), removal.chunkZ(), false);
     }
 
     private void verifyConstructionRemovals(Player player, List<ConstructionRemoval> removals, boolean retried) {
@@ -2171,9 +2250,16 @@ public final class CivicCore extends Plugin implements Listener {
     }
 
     private static boolean constructionStillExists(ConstructionRemoval removal) {
-        ConstructionElement element = World.getConstructionElement(
-                removal.globalId(), removal.chunkX(), removal.chunkY(), removal.chunkZ());
-        return element != null && element.isValid();
+        Chunk chunk = World.getChunk(removal.chunkX(), removal.chunkZ());
+        if (chunk == null || !chunk.isValid()) return false;
+        ConstructionElement[] elements = chunk.getAllConstructionElements();
+        if (elements == null) return false;
+        for (ConstructionElement element : elements) {
+            if (element != null && element.isValid()
+                    && element.getGlobalID() == removal.globalId()
+                    && element.getChunkPositionY() == removal.chunkY()) return true;
+        }
+        return false;
     }
 
     private static ConstructionElement findAimedHighlightedConstruction(
@@ -3827,6 +3913,12 @@ public final class CivicCore extends Plugin implements Listener {
         private static ConstructionRemoval from(ConstructionElement element) {
             return new ConstructionRemoval(element.getGlobalID(), element.getChunkPositionX(),
                     element.getChunkPositionY(), element.getChunkPositionZ());
+        }
+    }
+
+    private record PreparedConstructionRemoval(ConstructionElement element, Vector3f originalScale) {
+        private void restore() {
+            if (element != null && element.isValid()) element.setScale(originalScale.copy());
         }
     }
 
