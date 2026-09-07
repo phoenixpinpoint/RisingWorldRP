@@ -23,6 +23,7 @@ import com.example.risingworldstarter.groups.GroupService;
 import com.example.risingworldstarter.journal.JournalPage;
 import com.example.risingworldstarter.journal.JournalSection;
 import com.example.risingworldstarter.journal.JournalService;
+import com.example.risingworldstarter.map.TerrainMapRenderer;
 import com.example.risingworldstarter.spawns.CustomSpawn;
 import com.example.risingworldstarter.spawns.CustomSpawnService;
 import com.example.risingworldstarter.userstore.UserStoreListing;
@@ -88,6 +89,7 @@ import java.text.NumberFormat;
 import java.util.Locale;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -99,6 +101,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class CivicCore extends Plugin implements Listener {
     private static final int CLAIM_OVERVIEW_RADIUS = 5;
+    // Each step roughly quadruples the number of visible chunks.
+    private static final int[] MAP_RADII = {6, 12, 24, 48};
     private static final float SMALL_CONSTRUCTION_MAX_SIZE = 0.5f;
     private static final float CONSTRUCTION_HIGHLIGHT_MIN_SIZE = 0.35f;
     private static final float CONSTRUCTION_SELECTION_DISTANCE = 12f;
@@ -140,6 +144,13 @@ public final class CivicCore extends Plugin implements Listener {
     private final Map<String, JournalView> journalViews = new ConcurrentHashMap<>();
     private final Map<String, ClanView> clanViews = new ConcurrentHashMap<>();
     private final Map<String, UserStoreView> userStoreViews = new ConcurrentHashMap<>();
+    private final Map<String, TerrainMapView> terrainMapViews = new ConcurrentHashMap<>();
+    private final Map<Long, float[]> terrainMapSurfaceCache = Collections.synchronizedMap(
+            new LinkedHashMap<>(256, 0.75f, true) {
+                @Override protected boolean removeEldestEntry(Map.Entry<Long, float[]> eldest) {
+                    return size() > 4096;
+                }
+            });
     private final Map<String, CharacterService.CharacterSummary> activeCharacters = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Text3D>> adminProfileNameLabels = new ConcurrentHashMap<>();
     private final Map<String, String> activeClaimIdentities = new ConcurrentHashMap<>();
@@ -400,6 +411,9 @@ public final class CivicCore extends Plugin implements Listener {
         journalViews.clear();
         clanViews.clear();
         userStoreViews.clear();
+        terrainMapViews.values().forEach(view -> view.texture().dispose());
+        terrainMapViews.clear();
+        terrainMapSurfaceCache.clear();
         activeCharacters.clear();
         adminProfileNameLabels.clear();
         activeClaimIdentities.clear();
@@ -519,6 +533,8 @@ public final class CivicCore extends Plugin implements Listener {
         if (journalView != null) saveJournalPage(event.getPlayer(), journalView, false);
         clanViews.remove(event.getPlayer().getUID());
         userStoreViews.remove(event.getPlayer().getUID());
+        TerrainMapView mapView = terrainMapViews.remove(event.getPlayer().getUID());
+        if (mapView != null) mapView.texture().dispose();
         characterSelectionViews.remove(event.getPlayer().getUID());
         appearanceViews.remove(event.getPlayer().getUID());
         claimProtectionNotices.remove(event.getPlayer().getUID());
@@ -669,9 +685,18 @@ public final class CivicCore extends Plugin implements Listener {
     @EventMethod public void onCreativeRemoveVegetation(PlayerCreativeRemoveVegetationEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
     @EventMethod public void onHitVegetation(PlayerHitVegetationEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
 
-    @EventMethod public void onPlaceTerrain(PlayerPlaceTerrainEvent event) { protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
-    @EventMethod public void onDestroyTerrain(PlayerDestroyTerrainEvent event) { protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
-    @EventMethod public void onCreativeTerrainEdit(PlayerCreativeTerrainEditEvent event) { protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
+    @EventMethod public void onPlaceTerrain(PlayerPlaceTerrainEvent event) {
+        protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        if (!event.isCancelled()) invalidateTerrainMapChunk(event.getChunkPositionX(), event.getChunkPositionZ());
+    }
+    @EventMethod public void onDestroyTerrain(PlayerDestroyTerrainEvent event) {
+        protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        if (!event.isCancelled()) invalidateTerrainMapChunk(event.getChunkPositionX(), event.getChunkPositionZ());
+    }
+    @EventMethod public void onCreativeTerrainEdit(PlayerCreativeTerrainEditEvent event) {
+        protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ());
+        if (!event.isCancelled()) invalidateTerrainMapChunk(event.getChunkPositionX(), event.getChunkPositionZ());
+    }
     @EventMethod public void onHitTerrain(PlayerHitTerrainEvent event) { protect(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
     @EventMethod public void onPlaceGrass(PlayerPlaceGrassEvent event) { protectOwnedLand(event, event.getChunkPositionX(), event.getChunkPositionZ()); }
     @EventMethod public void onRemoveGrass(PlayerRemoveGrassEvent event) {
@@ -983,6 +1008,8 @@ public final class CivicCore extends Plugin implements Listener {
                 (player, parts) -> showCurrentChunk(player, true));
         registerCommand("Land Claims", "/claims", "List and toggle your claimed chunks.", true, List.of(),
                 (player, parts) -> listOwnedChunks(player));
+        registerCommand("Land Claims", "/map", "Open the large topographical claim map.", true, List.of(),
+                (player, parts) -> toggleTerrainMap(player));
         registerCommand("Land Claims", "/claimadmin <add|remove|list> [player]", "Manage claim administrators.", true,
                 List.of(), this::handleClaimAdminCommand);
         registerCommand("Storage", "/chest <lock|unlock|status>", "Manage the chest you are looking at.", true,
@@ -1970,14 +1997,265 @@ public final class CivicCore extends Plugin implements Listener {
                 + " chunk area around you. Use /claims again to hide it.</color>");
     }
 
+    private void toggleTerrainMap(Player player) {
+        if (terrainMapViews.containsKey(player.getUID())) {
+            closeTerrainMap(player);
+            return;
+        }
+        Vector3i chunk = player.getChunkPosition();
+        openTerrainMap(player, chunk.x, chunk.z, 1, true);
+    }
+
+    private void openTerrainMap(Player player, int centerChunkX, int centerChunkZ,
+                                int zoomIndex, boolean showClaims) {
+        TerrainMapView previous = terrainMapViews.remove(player.getUID());
+        if (previous != null) {
+            player.removeUIElement(previous.window());
+            previous.texture().dispose();
+        }
+        int radius = MAP_RADII[zoomIndex];
+        UIElement window = new UIElement();
+        window.setPosition(50f, 50f, true);
+        window.setPivot(Pivot.MiddleCenter);
+        window.setSize(980f, 740f, false);
+        window.setBackgroundColor((int) 0x151A20FAL);
+
+        UILabel title = new UILabel("Topographical Map");
+        title.setPosition(20f, 12f, false);
+        title.setSize(610f, 42f, false);
+        title.setFontSize(25f);
+        title.setFontColor(0xE8C547FF);
+        window.addChild(title);
+
+        UILabel close = journalButton("X", 926f, 14f, 34f, 34f);
+        close.setBackgroundColor((int) 0x8B2D2DFFL);
+        window.addChild(close);
+
+        TextureAsset texture = renderTerrainMapTexture(player, centerChunkX, centerChunkZ, zoomIndex, showClaims);
+
+        UIElement map = new UIElement();
+        map.setPosition(20f, 68f, false);
+        map.setSize(640f, 640f, false);
+        map.setBorder(2f);
+        map.setBorderColor((int) 0x66717EFFL);
+        map.style.backgroundImage.set(texture);
+        map.style.backgroundImageScaleMode.set(ScaleMode.StretchToFill);
+        map.setClickable(true);
+        window.addChild(map);
+
+        UILabel location = new UILabel("Center chunk\n" + centerChunkX + ", " + centerChunkZ
+                + "\n\nCoverage\n" + (radius * 2 + 1) + " × " + (radius * 2 + 1) + " chunks");
+        location.setPosition(686f, 76f, false);
+        location.setSize(260f, 112f, false);
+        location.setFontSize(17f);
+        location.setFontColor(0xD6DEE8FF);
+        window.addChild(location);
+
+        UILabel north = journalButton("N", 776f, 204f, 62f, 42f);
+        UILabel west = journalButton("W", 706f, 252f, 62f, 42f);
+        UILabel recenter = journalButton("PLAYER", 776f, 252f, 92f, 42f);
+        UILabel east = journalButton("E", 876f, 252f, 62f, 42f);
+        UILabel south = journalButton("S", 776f, 300f, 62f, 42f);
+        window.addChild(north); window.addChild(west); window.addChild(recenter);
+        window.addChild(east); window.addChild(south);
+
+        UILabel zoomIn = journalButton("ZOOM IN", 686f, 370f, 120f, 42f);
+        UILabel zoomOut = journalButton("ZOOM OUT", 816f, 370f, 120f, 42f);
+        zoomIn.setClickable(zoomIndex > 0);
+        zoomOut.setClickable(zoomIndex + 1 < MAP_RADII.length);
+        if (zoomIndex == 0) zoomIn.setBackgroundColor((int) 0x333941FFL);
+        if (zoomIndex + 1 == MAP_RADII.length) zoomOut.setBackgroundColor((int) 0x333941FFL);
+        window.addChild(zoomIn); window.addChild(zoomOut);
+
+        UILabel claimToggle = journalButton(showClaims ? "CLAIMS: ON" : "CLAIMS: OFF",
+                686f, 430f, 250f, 46f);
+        claimToggle.setBackgroundColor(showClaims ? (int) 0x2E7D4FFF : (int) 0x555B64FFL);
+        window.addChild(claimToggle);
+
+        UILabel selectedClaim = new UILabel();
+        selectedClaim.setPosition(686f, 492f, false);
+        selectedClaim.setSize(250f, 76f, false);
+        selectedClaim.setFontSize(16f);
+        selectedClaim.setFontColor(0xD6DEE8FF);
+        window.addChild(selectedClaim);
+
+        UILabel claimAction = journalButton("CLAIM", 686f, 576f, 120f, 42f);
+        UILabel unclaimAction = journalButton("UNCLAIM", 816f, 576f, 120f, 42f);
+        window.addChild(claimAction); window.addChild(unclaimAction);
+
+        UILabel legend = new UILabel("Blue: yours   Purple: clan   Red: other\nContours: 20 units   •   Click map to select");
+        legend.setPosition(686f, 640f, false);
+        legend.setSize(270f, 58f, false);
+        legend.setFontSize(14f);
+        legend.setFontColor(0xBCC7D4FF);
+        window.addChild(legend);
+
+        TerrainMapView view = new TerrainMapView(window, map, texture, location, close, north, south, east, west,
+                recenter, zoomIn, zoomOut, claimToggle, selectedClaim, claimAction, unclaimAction,
+                centerChunkX, centerChunkZ, zoomIndex, showClaims,
+                player.getChunkPosition().x, player.getChunkPosition().z);
+        terrainMapViews.put(player.getUID(), view);
+        updateTerrainMapSelection(player, view, view.selectedX(), view.selectedZ());
+        player.addUIElement(window);
+        player.stopInput(true, true);
+        player.setMouseCursorVisible(true);
+    }
+
+    private void closeTerrainMap(Player player) {
+        TerrainMapView view = terrainMapViews.remove(player.getUID());
+        if (view == null) return;
+        player.removeUIElement(view.window());
+        view.texture().dispose();
+        player.stopInput(false, false);
+        player.setMouseCursorVisible(false);
+    }
+
+    private void invalidateTerrainMapChunk(int chunkX, int chunkZ) {
+        terrainMapSurfaceCache.remove(((long) chunkX << 32) ^ (chunkZ & 0xffffffffL));
+    }
+
+    private TextureAsset renderTerrainMapTexture(Player player, int centerChunkX, int centerChunkZ,
+                                                  int zoomIndex, boolean showClaims) {
+        int radius = MAP_RADII[zoomIndex];
+        Map<ClaimedChunk, Claim> mapClaims = claims.getClaimsInArea(centerChunkX - radius,
+                centerChunkX + radius, centerChunkZ - radius, centerChunkZ + radius);
+        String ownerId = characterKey(player);
+        String clanOwnerId = groups.findByMember(ownerId).map(Group::claimOwnerId).orElse(null);
+        boolean regionalZoom = radius > 24;
+        Map<Long, Chunk> regionalChunks = regionalZoom ? new LinkedHashMap<>() : null;
+        byte[] png = TerrainMapRenderer.render(centerChunkX, centerChunkZ, radius,
+                Chunk.SIZE_X, Chunk.SIZE_Z, (chunkX, chunkZ, localX, localZ) -> {
+                    long key = ((long) chunkX << 32) ^ (chunkZ & 0xffffffffL);
+                    if (regionalZoom) {
+                        Chunk chunk = regionalChunks.computeIfAbsent(key,
+                                ignored -> World.getChunk(chunkX, chunkZ));
+                        return chunk != null && chunk.isValid()
+                                ? chunk.getLODSurfaceLevel(localX, localZ, true) : Float.NaN;
+                    }
+                    float[] surface = terrainMapSurfaceCache.get(key);
+                    if (surface == null) {
+                        Chunk chunk = World.getChunk(chunkX, chunkZ);
+                        if (chunk == null || !chunk.isValid()) return Float.NaN;
+                        surface = chunk.getLODTerrain();
+                        if (surface == null) return Float.NaN;
+                        terrainMapSurfaceCache.put(key, surface);
+                    }
+                    int index = Chunk.getTerrainIndex(localX, localZ);
+                    return index >= 0 && index < surface.length ? surface[index] : Float.NaN;
+                }, mapClaims, showClaims, ownerId, clanOwnerId,
+                player.getPosition().x, player.getPosition().z);
+        return TextureAsset.load(png);
+    }
+
+    private void refreshTerrainMap(Player player, TerrainMapView oldView, int centerChunkX,
+                                   int centerChunkZ, int zoomIndex, boolean showClaims) {
+        TextureAsset newTexture = renderTerrainMapTexture(player, centerChunkX, centerChunkZ,
+                zoomIndex, showClaims);
+        oldView.map().style.backgroundImage.set(newTexture);
+        oldView.map().updateStyle();
+
+        int radius = MAP_RADII[zoomIndex];
+        oldView.location().setText("Center chunk\n" + centerChunkX + ", " + centerChunkZ
+                + "\n\nCoverage\n" + (radius * 2 + 1) + " × " + (radius * 2 + 1) + " chunks");
+        oldView.zoomIn().setClickable(zoomIndex > 0);
+        oldView.zoomIn().setBackgroundColor(zoomIndex > 0 ? (int) 0x3A4655FFL : (int) 0x333941FFL);
+        oldView.zoomOut().setClickable(zoomIndex + 1 < MAP_RADII.length);
+        oldView.zoomOut().setBackgroundColor(zoomIndex + 1 < MAP_RADII.length
+                ? (int) 0x3A4655FFL : (int) 0x333941FFL);
+        oldView.claimToggle().setText(showClaims ? "CLAIMS: ON" : "CLAIMS: OFF");
+        oldView.claimToggle().setBackgroundColor(showClaims ? (int) 0x2E7D4FFF : (int) 0x555B64FFL);
+
+        TerrainMapView updated = new TerrainMapView(oldView.window(), oldView.map(), newTexture,
+                oldView.location(), oldView.close(), oldView.north(), oldView.south(), oldView.east(),
+                oldView.west(), oldView.recenter(), oldView.zoomIn(), oldView.zoomOut(),
+                oldView.claimToggle(), oldView.selectedClaim(), oldView.claimAction(), oldView.unclaimAction(),
+                centerChunkX, centerChunkZ, zoomIndex, showClaims, oldView.selectedX(), oldView.selectedZ());
+        terrainMapViews.put(player.getUID(), updated);
+        updateTerrainMapSelection(player, updated, updated.selectedX(), updated.selectedZ());
+        TextureAsset previousTexture = oldView.texture();
+        executeDelayed(2f, previousTexture::dispose);
+    }
+
+    private void updateTerrainMapSelection(Player player, TerrainMapView view, int chunkX, int chunkZ) {
+        Claim claim = claims.getClaim(chunkX, chunkZ).orElse(null);
+        Vector3i playerChunk = player.getChunkPosition();
+        boolean playerIsHere = playerChunk.x == chunkX && playerChunk.z == chunkZ;
+        String ownership = claim == null ? "Available" : "Owned by " + claim.ownerName();
+        view.selectedClaim().setText("Selected chunk: " + chunkX + ", " + chunkZ + "\n" + ownership
+                + (playerIsHere ? "\nYou are in this chunk" : "\nMap claim management available"));
+
+        boolean canClaim = claim == null && economy.getBalance(characterKey(player)) >= economySettings.claimCost();
+        boolean canUnclaim = claim != null
+                && (claim.ownerUid().equals(characterKey(player)) || isClaimAdmin(player));
+        view.claimAction().setClickable(canClaim);
+        view.claimAction().setBackgroundColor(canClaim ? (int) 0x2E7D4FFF : (int) 0x333941FFL);
+        view.unclaimAction().setClickable(canUnclaim);
+        view.unclaimAction().setBackgroundColor(canUnclaim ? (int) 0x8B4A2DFFL : (int) 0x333941FFL);
+
+        TerrainMapView selected = new TerrainMapView(view.window(), view.map(), view.texture(), view.location(),
+                view.close(), view.north(), view.south(), view.east(), view.west(), view.recenter(),
+                view.zoomIn(), view.zoomOut(), view.claimToggle(), view.selectedClaim(), view.claimAction(),
+                view.unclaimAction(), view.centerX(), view.centerZ(), view.zoomIndex(), view.showClaims(),
+                chunkX, chunkZ);
+        terrainMapViews.put(player.getUID(), selected);
+    }
+
+    private void handleTerrainMapClick(Player player, TerrainMapView view,
+                                       PlayerUIElementClickEvent event) {
+        int id = event.getUIElement().getID();
+        if (id == view.close().getID()) { closeTerrainMap(player); return; }
+        int pan = Math.max(2, MAP_RADII[view.zoomIndex()]);
+        if (id == view.north().getID()) { refreshTerrainMap(player, view, view.centerX(), view.centerZ() - pan, view.zoomIndex(), view.showClaims()); return; }
+        if (id == view.south().getID()) { refreshTerrainMap(player, view, view.centerX(), view.centerZ() + pan, view.zoomIndex(), view.showClaims()); return; }
+        if (id == view.west().getID()) { refreshTerrainMap(player, view, view.centerX() - pan, view.centerZ(), view.zoomIndex(), view.showClaims()); return; }
+        if (id == view.east().getID()) { refreshTerrainMap(player, view, view.centerX() + pan, view.centerZ(), view.zoomIndex(), view.showClaims()); return; }
+        if (id == view.recenter().getID()) {
+            Vector3i chunk = player.getChunkPosition();
+            refreshTerrainMap(player, view, chunk.x, chunk.z, view.zoomIndex(), view.showClaims()); return;
+        }
+        if (id == view.zoomIn().getID() && view.zoomIndex() > 0) {
+            refreshTerrainMap(player, view, view.centerX(), view.centerZ(), view.zoomIndex() - 1, view.showClaims()); return;
+        }
+        if (id == view.zoomOut().getID() && view.zoomIndex() + 1 < MAP_RADII.length) {
+            refreshTerrainMap(player, view, view.centerX(), view.centerZ(), view.zoomIndex() + 1, view.showClaims()); return;
+        }
+        if (id == view.claimToggle().getID()) {
+            refreshTerrainMap(player, view, view.centerX(), view.centerZ(), view.zoomIndex(), !view.showClaims()); return;
+        }
+        if (id == view.claimAction().getID()) {
+            claimChunk(player, view.selectedX(), view.selectedZ());
+            refreshTerrainMap(player, view, view.centerX(), view.centerZ(),
+                    view.zoomIndex(), view.showClaims());
+            return;
+        }
+        if (id == view.unclaimAction().getID()) {
+            unclaimChunk(player, view.selectedX(), view.selectedZ());
+            refreshTerrainMap(player, view, view.centerX(), view.centerZ(),
+                    view.zoomIndex(), view.showClaims());
+            return;
+        }
+        if (id == view.map().getID()) {
+            int side = MAP_RADII[view.zoomIndex()] * 2 + 1;
+            int chunkX = view.centerX() - MAP_RADII[view.zoomIndex()]
+                    + Math.min(side - 1, Math.max(0, (int) (event.getRelativeMousePositionX() / 100f * side)));
+            int chunkZ = view.centerZ() - MAP_RADII[view.zoomIndex()]
+                    + Math.min(side - 1, Math.max(0, (int) (event.getRelativeMousePositionY() / 100f * side)));
+            updateTerrainMapSelection(player, view, chunkX, chunkZ);
+        }
+    }
+
     private void claimCurrentChunk(Player player) {
         Vector3i chunk = player.getChunkPosition();
-        Claim existing = claims.getClaim(chunk.x, chunk.z).orElse(null);
+        claimChunk(player, chunk.x, chunk.z);
+    }
+
+    private void claimChunk(Player player, int chunkX, int chunkZ) {
+        Claim existing = claims.getClaim(chunkX, chunkZ).orElse(null);
         if (existing != null) {
             String owner = canAccessOwner(characterKey(player), existing.ownerUid()) ? "you or your clan" : existing.ownerName();
-            player.sendTextMessage("<color=#FF7777>Chunk " + chunk.x + ", " + chunk.z
+            player.sendTextMessage("<color=#FF7777>Chunk " + chunkX + ", " + chunkZ
                     + " is already claimed by " + owner + ".</color>");
-            showCurrentChunk(player, false);
+            showCurrentChunkIfPresent(player, chunkX, chunkZ);
             return;
         }
 
@@ -1990,42 +2268,51 @@ public final class CivicCore extends Plugin implements Listener {
             return;
         }
 
-        if (!claims.claim(chunk.x, chunk.z, characterKey, player.getName())) {
+        if (!claims.claim(chunkX, chunkZ, characterKey, player.getName())) {
             player.sendTextMessage("<color=#FF7777>That chunk was claimed before your request completed.</color>");
             return;
         }
         try {
             if (!economy.withdraw(characterKey, claimCost)) {
-                claims.forceUnclaim(chunk.x, chunk.z);
+                claims.forceUnclaim(chunkX, chunkZ);
                 player.sendTextMessage("<color=#FF7777>Your balance changed before payment completed.</color>");
                 return;
             }
         } catch (RuntimeException exception) {
-            claims.forceUnclaim(chunk.x, chunk.z);
+            claims.forceUnclaim(chunkX, chunkZ);
             throw exception;
         }
         updateBalanceLabel(player);
-        player.sendTextMessage("<color=#77FF99>Claimed chunk " + chunk.x + ", " + chunk.z
+        player.sendTextMessage("<color=#77FF99>Claimed chunk " + chunkX + ", " + chunkZ
                 + " for " + formatBalance(claimCost) + ".</color>");
-        showCurrentChunk(player, false);
+        showCurrentChunkIfPresent(player, chunkX, chunkZ);
     }
 
     private void unclaimCurrentChunk(Player player) {
         Vector3i chunk = player.getChunkPosition();
-        Claim existing = claims.getClaim(chunk.x, chunk.z).orElse(null);
+        unclaimChunk(player, chunk.x, chunk.z);
+    }
+
+    private void unclaimChunk(Player player, int chunkX, int chunkZ) {
+        Claim existing = claims.getClaim(chunkX, chunkZ).orElse(null);
         if (existing == null) {
             player.sendTextMessage("<color=#AAAAAA>This chunk is not claimed.</color>");
         } else if (!existing.ownerUid().equals(characterKey(player)) && !isClaimAdmin(player)) {
             player.sendTextMessage("<color=#FF7777>This chunk is claimed by " + existing.ownerName() + ".</color>");
         } else {
             if (existing.ownerUid().equals(characterKey(player))) {
-                claims.unclaim(chunk.x, chunk.z, characterKey(player));
+                claims.unclaim(chunkX, chunkZ, characterKey(player));
             } else {
-                claims.forceUnclaim(chunk.x, chunk.z);
+                claims.forceUnclaim(chunkX, chunkZ);
             }
-            player.sendTextMessage("<color=#77FF99>Unclaimed chunk " + chunk.x + ", " + chunk.z + ".</color>");
+            player.sendTextMessage("<color=#77FF99>Unclaimed chunk " + chunkX + ", " + chunkZ + ".</color>");
         }
-        showCurrentChunk(player, false);
+        showCurrentChunkIfPresent(player, chunkX, chunkZ);
+    }
+
+    private void showCurrentChunkIfPresent(Player player, int chunkX, int chunkZ) {
+        Vector3i current = player.getChunkPosition();
+        if (current.x == chunkX && current.z == chunkZ) showCurrentChunk(player, false);
     }
 
     private void showCurrentChunk(Player player, boolean toggle) {
@@ -3834,6 +4121,11 @@ public final class CivicCore extends Plugin implements Listener {
     @EventMethod
     public void onStoreClick(PlayerUIElementClickEvent event) {
         Player player = event.getPlayer();
+        TerrainMapView terrainMapView = terrainMapViews.get(player.getUID());
+        if (terrainMapView != null) {
+            handleTerrainMapClick(player, terrainMapView, event);
+            return;
+        }
         ClanView clanView = clanViews.get(player.getUID());
         if (clanView != null) {
             handleClanDialogClick(player, clanView, event.getUIElement().getID());
@@ -4070,6 +4362,13 @@ public final class CivicCore extends Plugin implements Listener {
 
     private record UserStoreView(UIElement window, UILabel close, UILabel refresh,
                                  Map<Integer, Long> listingByButton) { }
+
+    private record TerrainMapView(UIElement window, UIElement map, TextureAsset texture,
+                                  UILabel location, UILabel close, UILabel north, UILabel south, UILabel east,
+                                  UILabel west, UILabel recenter, UILabel zoomIn, UILabel zoomOut,
+                                  UILabel claimToggle, UILabel selectedClaim, UILabel claimAction,
+                                  UILabel unclaimAction, int centerX, int centerZ, int zoomIndex,
+                                  boolean showClaims, int selectedX, int selectedZ) { }
 
     private record ClanView(UIElement window, UILabel close,
                             Map<Integer, ClanDialogAction> actions) { }

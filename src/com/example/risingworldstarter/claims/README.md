@@ -21,6 +21,8 @@ database. Other plugins can access claims through `CivicCore.getClaimService()`.
 - `/chunk` reports and visualizes the current chunk and owner.
 - `/claims` lists personal claims and toggles an 11-by-11 chunk ownership overview
   centered on the active character's current chunk.
+- `/map` opens a fullscreen topographical map with four zoom levels, directional
+  panning, player recentering, coordinate inspection, and a toggleable claim layer.
 - `/unclaim` releases the current chunk.
 - `/claimadmin add <online-player>` adds a claim administrator.
 - `/claimadmin remove <online-player>` removes a claim administrator.
@@ -29,6 +31,18 @@ database. Other plugins can access claims through `CivicCore.getClaimService()`.
 In the `/claims` overview, boundaries are green when available, blue when owned
 by the viewing character, purple when owned by that character's clan, and red
 when unavailable. The overview uses one bounded database query when opened.
+
+The `/map` claim layer uses the same blue, purple, and red ownership colors over
+terrain hillshading and 20-unit contour lines. Dark blank terrain indicates a
+chunk that is not currently available from the world API. Clicking the map
+shows the selected chunk and its owner in the sidebar. Panning, zooming, recentering,
+and changing claim visibility replace only the map texture; the surrounding
+window and controls remain mounted.
+
+Selecting a chunk also opens its claim-management controls in the map sidebar.
+An available selected chunk can be claimed when the character can afford it;
+personally owned chunks can be unclaimed, and claim administrators can unclaim
+other owners' chunks. Each action is validated again when clicked.
 
 ## Protection rules
 
