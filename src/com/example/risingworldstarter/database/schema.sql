@@ -92,6 +92,22 @@ CREATE TABLE IF NOT EXISTS journal_pages (
     UNIQUE (section_id, page_number)
 );
 
+CREATE TABLE IF NOT EXISTS custom_spawns (
+    character_key TEXT NOT NULL,
+    name TEXT NOT NULL COLLATE NOCASE,
+    position_x REAL NOT NULL,
+    position_y REAL NOT NULL,
+    position_z REAL NOT NULL,
+    rotation_x REAL NOT NULL,
+    rotation_y REAL NOT NULL,
+    rotation_z REAL NOT NULL,
+    rotation_w REAL NOT NULL,
+    PRIMARY KEY (character_key, name)
+);
+
+CREATE INDEX IF NOT EXISTS custom_spawns_character_idx
+    ON custom_spawns (character_key, name);
+
 CREATE TABLE IF NOT EXISTS user_store_listings (
     listing_id INTEGER PRIMARY KEY AUTOINCREMENT,
     seller_key TEXT NOT NULL,

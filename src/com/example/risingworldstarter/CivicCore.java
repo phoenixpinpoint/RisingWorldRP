@@ -23,6 +23,8 @@ import com.example.risingworldstarter.groups.GroupService;
 import com.example.risingworldstarter.journal.JournalPage;
 import com.example.risingworldstarter.journal.JournalSection;
 import com.example.risingworldstarter.journal.JournalService;
+import com.example.risingworldstarter.spawns.CustomSpawn;
+import com.example.risingworldstarter.spawns.CustomSpawnService;
 import com.example.risingworldstarter.userstore.UserStoreListing;
 import com.example.risingworldstarter.userstore.UserStoreService;
 import net.risingworld.api.Plugin;
@@ -159,6 +161,7 @@ public final class CivicCore extends Plugin implements Listener {
     private ChestService chests;
     private GroupService groups;
     private JournalService journals;
+    private CustomSpawnService customSpawns;
     private UserStoreService userStore;
     private EconomySettings economySettings;
     private StoreCatalog storeCatalog;
@@ -198,6 +201,7 @@ public final class CivicCore extends Plugin implements Listener {
         chests = new ChestService(database);
         groups = new GroupService(database);
         journals = new JournalService(database);
+        customSpawns = new CustomSpawnService(database);
         userStore = new UserStoreService(database);
         characterService = new CharacterService(database);
         groups.migrateLegacy(worldDataPath.resolve("groups.properties"));
@@ -928,6 +932,15 @@ public final class CivicCore extends Plugin implements Listener {
                 (player, parts) -> showCommands(player));
         registerCommand("General", "/about", "Show CivicCore information and version.", false, List.of(),
                 (player, parts) -> showAbout(player));
+        registerCommand("General", "/spawn [name]", "Teleport to the server spawn or a named custom spawn.",
+                true, List.of(), List.of(new CommandHelp("/spawn <name>", "Teleport to a custom spawn.")),
+                this::handleSpawnCommand);
+        registerCommand("General", "/setspawn <name>", "Create or update a custom spawn at your location.",
+                true, List.of(), this::setCustomSpawn);
+        registerCommand("General", "/delspawn <name>", "Delete one of your custom spawns.",
+                true, List.of("/deletespawn"), this::deleteCustomSpawn);
+        registerCommand("General", "/spawns", "List your custom spawns.", true, List.of(),
+                (player, parts) -> listCustomSpawns(player));
         registerCommand("Building", "/highlightblocks", "Toggle outlines around small construction pieces in your current chunk.",
                 true, List.of("/highlightpieces", "/highlightselected", "/blocks"),
                 (player, parts) -> toggleConstructionHighlights(player));
@@ -1000,6 +1013,47 @@ public final class CivicCore extends Plugin implements Listener {
         String primaryName = usage.split("\\s+", 2)[0];
         commandRegistry.register("CivicCore", primaryName, category, usage, description,
                 requiresCharacter, aliases, additionalHelp, action);
+    }
+
+    private void handleSpawnCommand(Player player, String[] parts) {
+        if (parts.length == 1) {
+            player.setPosition(Server.getDefaultSpawnPosition());
+            player.sendTextMessage("<color=#77AAFF>Teleported to server spawn.</color>");
+            return;
+        }
+        if (parts.length != 2) throw new IllegalArgumentException("Spawn names cannot contain spaces.");
+        CustomSpawn spawn = customSpawns.find(characterKey(player), parts[1])
+                .orElseThrow(() -> new IllegalArgumentException("No custom spawn named " + parts[1] + "."));
+        player.setPosition(spawn.x(), spawn.y(), spawn.z());
+        player.setRotation(new Quaternion(spawn.rotationX(), spawn.rotationY(), spawn.rotationZ(), spawn.rotationW()));
+        player.sendTextMessage("<color=#77AAFF>Teleported to " + spawn.name() + ".</color>");
+    }
+
+    private void setCustomSpawn(Player player, String[] parts) {
+        if (parts.length != 2) throw new IllegalArgumentException("Spawn names cannot contain spaces.");
+        Vector3f position = player.getPosition();
+        Quaternion rotation = player.getRotation();
+        customSpawns.save(characterKey(player), parts[1], position.x, position.y, position.z,
+                rotation.x, rotation.y, rotation.z, rotation.w);
+        player.sendTextMessage("<color=#77FF99>Custom spawn " + parts[1] + " saved.</color>");
+    }
+
+    private void deleteCustomSpawn(Player player, String[] parts) {
+        if (parts.length != 2) throw new IllegalArgumentException("Spawn names cannot contain spaces.");
+        if (!customSpawns.delete(characterKey(player), parts[1]))
+            throw new IllegalArgumentException("No custom spawn named " + parts[1] + ".");
+        player.sendTextMessage("<color=#77FF99>Custom spawn " + parts[1] + " deleted.</color>");
+    }
+
+    private void listCustomSpawns(Player player) {
+        List<CustomSpawn> spawns = customSpawns.getAll(characterKey(player));
+        if (spawns.isEmpty()) {
+            player.sendTextMessage("<color=#AAAAAA>You have no custom spawns. Use /setspawn followed by a name.</color>");
+            return;
+        }
+        player.sendTextMessage("<color=#E8C547>Custom spawns (" + spawns.size() + "/"
+                + CustomSpawnService.MAX_SPAWNS + "):</color> "
+                + spawns.stream().map(CustomSpawn::name).reduce((left, right) -> left + ", " + right).orElse(""));
     }
 
     private void showHelp(Player player) {
@@ -2729,6 +2783,7 @@ public final class CivicCore extends Plugin implements Listener {
                         CharacterService.CharacterSummary active = activeCharacters.get(player.getUID());
                         characterService.deleteCharacter(player.getUID(), character);
                         journals.deleteJournal(character.economyKey());
+                        customSpawns.deleteAll(character.economyKey());
                         groups.removeDeletedCharacter(character.economyKey());
                         int removedClaims = claims.deleteClaimsByOwner(character.economyKey());
                         economy.deleteAccount(character.economyKey());
