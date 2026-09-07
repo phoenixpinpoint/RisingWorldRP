@@ -143,6 +143,10 @@ the game's square item icon, its name and price, and quantity controls.
 Buying deducts the price and places one unit in the player's inventory. A failed
 inventory insertion is refunded. Items are sorted and grouped under the category
 reported by the game; definitions without a category appear under `Other`.
+Equip an item sold by the marketplace and use `/store sell [quantity]` to sell
+some or all of its stack back for 50% of its purchase price. Sold items are
+removed from the player's inventory and leave the game economy; the store does
+not retain stock. Items whose resale value rounds down to zero cannot be sold.
 Clickable category tabs, including an `All` tab, filter the product list. The
 search field performs a case-insensitive item-name search within the selected
 category as the player types.

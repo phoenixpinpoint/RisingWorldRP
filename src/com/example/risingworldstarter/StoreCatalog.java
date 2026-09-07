@@ -17,6 +17,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class StoreCatalog {
+    private static final int STORE_BUYBACK_PERCENT = 50;
     private static final Set<String> BLOCKED_ITEM_NAMES = Set.of(
             "clothingitem", "oldboot", "missingitem", "constructionitem",
             "objectkit", "objectkitsmall", "plantitem", "blueprint", "branch");
@@ -179,5 +180,8 @@ final class StoreCatalog {
     }
 
     record StoreItem(short id, String name, String category, long price) {
+        long sellPrice() {
+            return Math.multiplyExact(price, STORE_BUYBACK_PERCENT) / 100L;
+        }
     }
 }
