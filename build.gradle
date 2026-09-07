@@ -14,7 +14,7 @@ if (providers.gradleProperty('alternateBuildDir').present) {
 }
 
 group = 'com.example'
-version = '0.8.4'
+version = '0.9.0'
 
 def configuredRisingWorldPath = providers.gradleProperty('risingWorldPath')
         .orElse(providers.environmentVariable('RISING_WORLD_PATH'))
