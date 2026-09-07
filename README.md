@@ -85,6 +85,12 @@ and Close controls and is rejected for non-administrators. Each connected player
 has a Kick button and a Ban button; permanent bans require confirmation, and an
 administrator cannot kick or ban their own session from the dashboard.
 
+Administrators can manage character-scoped balances, including for offline
+characters, with `/money add <character> <amount>`, `/money remove <character>
+<amount>`, and `/money set <character> <amount>`. Character names containing
+spaces are supported. If multiple accounts have characters with the same name,
+the command refuses the ambiguous change.
+
 ## Economy API
 
 Players receive character-scoped balances, HUD updates, configurable salaries,
@@ -223,4 +229,3 @@ gradlew and gradlew.bat            Gradle wrapper launchers
 Your main class must extend `net.risingworld.api.Plugin` and implement `onEnable()` and `onDisable()`. Its full package/class name must exactly match `main:` in `resources/plugin.yml`. The build packages this definition as `resources/plugin.yml` inside the JAR, as required by Rising World.
 
 For the current API reference, open <https://javadoc.rising-world.net/>. The official setup guide says the game ships the SDK under `Data/SDK` and its JDK under `Data/Java/JDK`.
-

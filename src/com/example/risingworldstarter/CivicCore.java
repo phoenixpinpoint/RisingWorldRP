@@ -955,6 +955,12 @@ public final class CivicCore extends Plugin implements Listener {
                 this::handleUserStoreCommand);
         registerCommand("Administration", "/admin", "Open the administrator dashboard.", true, List.of(),
                 (player, parts) -> toggleAdminDashboard(player));
+        registerCommand("Administration", "/money <add|remove|set> <character> <amount>",
+                "Manage a character's cash balance.", false, List.of(), List.of(
+                        new CommandHelp("/money add <character> <amount>", "Add cash to a character."),
+                        new CommandHelp("/money remove <character> <amount>", "Remove cash from a character."),
+                        new CommandHelp("/money set <character> <amount>", "Set a character's cash balance.")),
+                this::handleMoneyCommand);
         registerCommand("Land Claims", "/claim", "Claim your current chunk.", true, List.of(),
                 (player, parts) -> claimCurrentChunk(player));
         registerCommand("Land Claims", "/unclaim", "Release your current chunk.", true, List.of(),
@@ -2795,6 +2801,63 @@ public final class CivicCore extends Plugin implements Listener {
         return character.economyKey();
     }
 
+    private void handleMoneyCommand(Player administrator, String[] parts) {
+        if (!administrator.isAdmin()) {
+            administrator.sendTextMessage("<color=#FF7777>Only server administrators can manage balances.</color>");
+            return;
+        }
+        if (parts.length < 4) {
+            throw new IllegalArgumentException("Usage: /money <add|remove|set> <character> <amount>");
+        }
+        String action = parts[1].toLowerCase(Locale.US);
+        if (!Set.of("add", "remove", "set").contains(action)) {
+            throw new IllegalArgumentException("Money action must be add, remove, or set");
+        }
+        String characterName = String.join(" ",
+                java.util.Arrays.copyOfRange(parts, 2, parts.length - 1)).trim();
+        if (characterName.isEmpty()) throw new IllegalArgumentException("Enter a character name");
+        long amount = action.equals("set")
+                ? parseNonNegativeCurrencyAmount(parts[parts.length - 1])
+                : parseCurrencyAmount(parts[parts.length - 1]);
+        List<CharacterService.CharacterSummary> matches = characterService.findCharactersByName(characterName);
+        if (matches.isEmpty()) throw new IllegalArgumentException("Character not found: " + characterName);
+        if (matches.size() > 1) {
+            throw new IllegalArgumentException("More than one character is named " + characterName
+                    + "; rename one before changing its balance");
+        }
+
+        CharacterService.CharacterSummary target = matches.get(0);
+        String targetKey = target.economyKey();
+        economy.createAccount(targetKey, economySettings.defaultBalance());
+        long newBalance;
+        switch (action) {
+            case "add" -> newBalance = economy.deposit(targetKey, amount);
+            case "remove" -> {
+                if (!economy.withdraw(targetKey, amount)) {
+                    throw new IllegalStateException(target.name() + " does not have " + formatBalance(amount));
+                }
+                newBalance = economy.getBalance(targetKey);
+            }
+            case "set" -> newBalance = economy.setBalance(targetKey, amount);
+            default -> throw new IllegalStateException("Unsupported money action: " + action);
+        }
+
+        for (Player connected : Server.getAllPlayers()) {
+            CharacterService.CharacterSummary active = activeCharacters.get(connected.getUID());
+            if (active == null || !active.id().equals(target.id())) continue;
+            updateBalanceLabel(connected);
+            if (!connected.getUID().equals(administrator.getUID())) {
+                connected.sendTextMessage("<color=#E8C547>Your balance is now "
+                        + formatBalance(newBalance) + ".</color>");
+            }
+        }
+        administrator.sendTextMessage("<color=#77FF99>" + target.name() + " now has "
+                + formatBalance(newBalance) + ".</color>");
+        debug("Administrator " + administrator.getName() + " used /money " + action + " on "
+                + target.name() + "; amount=" + formatBalance(amount)
+                + ", new balance=" + formatBalance(newBalance));
+    }
+
     /**
      * Adds a private profile-name line for administrator viewers. The game's
      * native overhead label remains the active character name for everyone.
@@ -3639,6 +3702,17 @@ public final class CivicCore extends Plugin implements Listener {
             long amount = new BigDecimal(value).movePointRight(2)
                     .setScale(0, RoundingMode.UNNECESSARY).longValueExact();
             if (amount <= 0) throw new IllegalArgumentException("Amount must be greater than zero.");
+            return amount;
+        } catch (ArithmeticException | NumberFormatException exception) {
+            throw new IllegalArgumentException("Enter a valid amount with no more than two decimal places.");
+        }
+    }
+
+    private static long parseNonNegativeCurrencyAmount(String value) {
+        try {
+            long amount = new BigDecimal(value).movePointRight(2)
+                    .setScale(0, RoundingMode.UNNECESSARY).longValueExact();
+            if (amount < 0) throw new IllegalArgumentException("Amount must not be negative.");
             return amount;
         } catch (ArithmeticException | NumberFormatException exception) {
             throw new IllegalArgumentException("Enter a valid amount with no more than two decimal places.");
