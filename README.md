@@ -78,6 +78,11 @@ character.
 Use `/commands` to open the categorized command browser, or `/help` to print the
 same registered commands in chat.
 
+Use `/spawn` to return to the server spawn. Each character can also save up to
+three private teleport locations with `/setspawn <name>`, view them with
+`/spawns`, travel to one with `/spawn <name>`, and remove one with `/delspawn
+<name>`. These locations do not replace Rising World's bed respawn.
+
 Server administrators can use `/admin` to open an in-game dashboard showing
 world time, player counts, claim totals, economy settings, enabled marketplace
 products, and the connected-player balance list. The dashboard includes Refresh

@@ -78,6 +78,7 @@ sourceSets {
         java.include 'com/example/risingworldstarter/economy/**'
         java.include 'com/example/risingworldstarter/groups/**'
         java.include 'com/example/risingworldstarter/journal/**'
+        java.include 'com/example/risingworldstarter/spawns/**'
         java.include 'com/example/risingworldstarter/userstore/**'
         java.include 'com/example/risingworldstarter/tests/**'
         resources.srcDirs = ['src']
