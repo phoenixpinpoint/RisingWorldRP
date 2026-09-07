@@ -961,8 +961,9 @@ public final class CivicCore extends Plugin implements Listener {
                     player.sendTextMessage("<color=#E8C547>Cash:</color> " + formattedBalance);
                     updateBalanceLabel(player);
                 });
-        registerCommand("Marketplace", "/store", "Open or close the marketplace.", true, List.of(),
-                (player, parts) -> toggleStore(player));
+        registerCommand("Marketplace", "/store", "Open or close the marketplace.", true, List.of(), List.of(
+                new CommandHelp("/store sell [quantity]", "Sell the equipped item to the store.")),
+                this::handleStoreCommand);
         registerCommand("Marketplace", "/userstore", "Open the player marketplace.", true, List.of("/ustore"), List.of(
                 new CommandHelp("/userstore sell <price> [quantity]", "List the equipped item stack for sale.")),
                 this::handleUserStoreCommand);
@@ -3224,6 +3225,43 @@ public final class CivicCore extends Plugin implements Listener {
         }
     }
 
+    private void handleStoreCommand(Player player, String[] parts) {
+        if (parts.length == 1) { toggleStore(player); return; }
+        if (!parts[1].equalsIgnoreCase("sell") || parts.length > 3) {
+            player.sendTextMessage("Usage: /store or /store sell [quantity]"); return;
+        }
+        try {
+            Inventory inventory = player.getInventory();
+            int slot = inventory.getEquippedItemSlot();
+            Inventory.SlotType slotType = inventory.getEquippedItemSlotType();
+            Item equipped = inventory.getItem(slot, slotType);
+            if (equipped == null || !equipped.isValid()) throw new IllegalStateException("Equip the item you want to sell.");
+            StoreCatalog.StoreItem catalogItem = storeCatalog.find(equipped.getTypeID());
+            if (catalogItem == null) throw new IllegalStateException("The store does not buy that item.");
+            if (catalogItem.sellPrice() <= 0) throw new IllegalStateException("That item has no resale value.");
+            int quantity = parts.length == 3 ? Integer.parseInt(parts[2]) : equipped.getStack();
+            if (quantity <= 0 || quantity > equipped.getStack())
+                throw new IllegalArgumentException("Quantity must be between 1 and " + equipped.getStack() + ".");
+            long proceeds = Math.multiplyExact(catalogItem.sellPrice(), quantity);
+            short itemType = equipped.getTypeID(); int variant = equipped.getVariant();
+            if (!inventory.removeItem(slot, slotType, quantity))
+                throw new IllegalStateException("Could not remove the item from inventory.");
+            try {
+                economy.deposit(characterKey(player), proceeds);
+            } catch (RuntimeException exception) {
+                inventory.addItem(itemType, variant, quantity);
+                throw exception;
+            }
+            updateBalanceLabel(player);
+            player.sendTextMessage("<color=#77FF99>Sold " + quantity + " × " + catalogItem.name()
+                    + " for " + formatBalance(proceeds) + ".</color>");
+        } catch (NumberFormatException exception) {
+            player.sendTextMessage("<color=#FF7777>Quantity must be a whole number.</color>");
+        } catch (RuntimeException exception) {
+            player.sendTextMessage("<color=#FF7777>" + exception.getMessage() + "</color>");
+        }
+    }
+
     private void toggleUserStore(Player player) {
         if (userStoreViews.containsKey(player.getUID())) { closeUserStore(player); return; }
         if (storeViews.containsKey(player.getUID())) closeStore(player);
@@ -3483,7 +3521,7 @@ public final class CivicCore extends Plugin implements Listener {
             if (outOfStock) view.cart().remove(storeItem.id());
             UILabel itemDetails = new UILabel(storeItem.name() + "\n"
                     + (outOfStock ? "<color=#FF7777>OUT OF STOCK — available in User Store</color>"
-                    : formatBalance(storeItem.price())));
+                    : "Buy " + formatBalance(storeItem.price()) + "  •  Sell " + formatBalance(storeItem.sellPrice())));
             itemDetails.setPosition(98f, 7f, false);
             itemDetails.setSize(280f, 72f, false);
             itemDetails.setFontSize(18f);
