@@ -251,7 +251,8 @@ public final class CivicCore extends Plugin implements Listener {
         debug("Event listener registered");
         executeDelayed(0.5f, () -> {
             for (Player player : Server.getAllPlayers()) {
-                if (player.isSpawned() && !activeCharacters.containsKey(player.getUID())) {
+                if (player != null && player.isSpawned()
+                        && !activeCharacters.containsKey(player.getUID())) {
                     initializeStoreCatalog();
                     initializeCharacterSession(player);
                 }
@@ -550,14 +551,16 @@ public final class CivicCore extends Plugin implements Listener {
 
     @EventMethod
     public void onPlayerChangeEquippedItem(PlayerChangeEquippedItemEvent event) {
+        Player player = event.getPlayer();
+        if (player == null) return;
         Item item = event.getItem();
         // Keep the last real item when the final unit disappears; the native
         // planting transaction may unequip it before its placement event fires.
         if (item != null && item.isValid()) {
-            lastEquippedItemTypes.put(event.getPlayer().getUID(), item.getTypeID());
-            lastEquippedItemVariants.put(event.getPlayer().getUID(), item.getVariant());
+            lastEquippedItemTypes.put(player.getUID(), item.getTypeID());
+            lastEquippedItemVariants.put(player.getUID(), item.getVariant());
             if (item instanceof Item.ConstructionItem constructionItem) {
-                String uid = event.getPlayer().getUID();
+                String uid = player.getUID();
                 String name = constructionItem.getConstructionName();
                 if (name != null) lastEquippedConstructionNames.put(uid, name);
                 lastEquippedConstructionIds.put(uid,
@@ -588,8 +591,8 @@ public final class CivicCore extends Plugin implements Listener {
         if (!event.isCancelled() && windowConstruction) {
             Vector3f cachedSize = lastEquippedConstructionSizes.get(event.getPlayer().getUID());
             Vector3f openingSize = cachedSize == null ? event.getSize().copy() : cachedSize.copy();
-            if (scheduleAutoTrim(event.getPlayer(), event.getPlayer().getPosition().copy(),
-                    event.getRotation().copy(), openingSize, false, true)) {
+            if (scheduleAutoTrim(event.getPlayer(), event.getPosition().copy(),
+                    event.getRotation().copy(), openingSize, false, false)) {
                 event.getPlayer().sendTextMessage("<color=#AAAAAA>Auto-trim checking window geometry...</color>");
                 debug("Auto-trim scheduled for construction type " + constructionTypeId
                         + " placed by " + event.getPlayer().getName());
@@ -748,10 +751,12 @@ public final class CivicCore extends Plugin implements Listener {
 
     @EventMethod
     public void onInventoryAddItem(PlayerInventoryAddItemEvent event) {
-        Long deniedUntil = deniedGrassRewardsUntil.get(event.getPlayer().getUID());
+        Player player = event.getPlayer();
+        if (player == null) return;
+        Long deniedUntil = deniedGrassRewardsUntil.get(player.getUID());
         if (deniedUntil == null) return;
         if (System.currentTimeMillis() > deniedUntil) {
-            deniedGrassRewardsUntil.remove(event.getPlayer().getUID(), deniedUntil);
+            deniedGrassRewardsUntil.remove(player.getUID(), deniedUntil);
             return;
         }
         Item item = event.getItem();
@@ -865,6 +870,7 @@ public final class CivicCore extends Plugin implements Listener {
     @EventMethod
     public void onPlayerChangePosition(PlayerChangePositionEvent event) {
         Player player = event.getPlayer();
+        if (player == null) return;
         if (constructionHighlightChunks.containsKey(player.getUID())) {
             Vector3i currentChunk = Utils.ChunkUtils.getChunkPosition(event.getPosition());
             String chunkKey = currentChunk.x + "," + currentChunk.z;
