@@ -28,6 +28,7 @@ import com.example.risingworldstarter.spawns.CustomSpawn;
 import com.example.risingworldstarter.spawns.CustomSpawnService;
 import com.example.risingworldstarter.userstore.UserStoreListing;
 import com.example.risingworldstarter.userstore.UserStoreService;
+import com.example.risingworldstarter.wallfit.WallFitService;
 import net.risingworld.api.Plugin;
 import net.risingworld.api.Server;
 import net.risingworld.api.Timer;
@@ -164,6 +165,7 @@ public final class CivicCore extends Plugin implements Listener {
     private final Map<String, Integer> lastEquippedConstructionIds = new ConcurrentHashMap<>();
     private final Map<String, Vector3f> lastEquippedConstructionSizes = new ConcurrentHashMap<>();
     private final Map<String, Long> autoTrimScheduledAt = new ConcurrentHashMap<>();
+    private final Set<String> wallFitEnabledPlayers = ConcurrentHashMap.newKeySet();
     private final CommandRegistry commandRegistry = new CommandRegistry();
     private Database database;
     private EconomyApi economy;
@@ -180,6 +182,7 @@ public final class CivicCore extends Plugin implements Listener {
     private volatile boolean storeCatalogLoaded;
     private CharacterService characterService;
     private WindowTrimService windowTrimService;
+    private WallFitService wallFitService;
     private Timer worldClockTimer;
     private Timer characterAutosaveTimer;
     private PayPeriod lastSalaryPeriod;
@@ -224,6 +227,8 @@ public final class CivicCore extends Plugin implements Listener {
                 + claimAdmins.getAll().size() + " claim administrators");
         windowTrimService = new WindowTrimService(CivicCore::debug);
         debug("Window auto-trim service loaded");
+        wallFitService = new WallFitService(CivicCore::debug);
+        debug("Wall fit service loaded (disabled for players by default)");
 
         Path economyConfigPath = worldDataPath.resolve("economy.properties");
         economySettings = EconomySettings.load(economyConfigPath);
@@ -427,6 +432,7 @@ public final class CivicCore extends Plugin implements Listener {
         lastEquippedConstructionIds.clear();
         lastEquippedConstructionSizes.clear();
         autoTrimScheduledAt.clear();
+        wallFitEnabledPlayers.clear();
         storeCatalogLoaded = false;
         if (database != null) {
             database.close();
@@ -545,6 +551,7 @@ public final class CivicCore extends Plugin implements Listener {
         lastEquippedConstructionIds.remove(event.getPlayer().getUID());
         lastEquippedConstructionSizes.remove(event.getPlayer().getUID());
         autoTrimScheduledAt.remove(event.getPlayer().getUID());
+        wallFitEnabledPlayers.remove(event.getPlayer().getUID());
         refreshAdminProfileNameLabels();
     }
 
@@ -573,6 +580,14 @@ public final class CivicCore extends Plugin implements Listener {
     @EventMethod public void onPlaceConstruction(PlayerPlaceConstructionEvent event) {
         Vector3i playerChunk = event.getPlayer().getChunkPosition();
         protectOwnedLand(event, playerChunk.x, playerChunk.z);
+        if (!event.isCancelled() && wallFitEnabledPlayers.contains(event.getPlayer().getUID())) {
+            WallFitService.FitResult result = wallFitService.fit(event);
+            if (result.fitted()) {
+                event.getPlayer().sendTextMessage(String.format(Locale.US,
+                        "<color=#77FF99>Wall fit: %.2f -> %.2f units.</color>",
+                        result.oldLength(), result.newLength()));
+            }
+        }
         int constructionTypeId = Byte.toUnsignedInt(event.getTypeID());
         String equippedConstructionName = lastEquippedConstructionNames.get(event.getPlayer().getUID());
         // The bundled definitions database currently lists window1-window10 as
@@ -969,6 +984,8 @@ public final class CivicCore extends Plugin implements Listener {
         registerCommand("Building", "/highlightblocks", "Toggle outlines around small construction pieces in your current chunk.",
                 true, List.of("/highlightpieces", "/highlightselected", "/blocks"),
                 (player, parts) -> toggleConstructionHighlights(player));
+        registerCommand("Building", "/wallfit [on|off|status]", "Toggle automatic fitting of walls to small foundation gaps.",
+                true, List.of(), this::handleWallFitCommand);
         registerCommand("Building", "/removehighlighted", "Prepare the highlighted construction piece under your crosshair for a sledgehammer hit.",
                 true, List.of("/removehighlight", "/removehighlightedblock"),
                 (player, parts) -> removeHighlightedConstruction(player));
@@ -1041,6 +1058,29 @@ public final class CivicCore extends Plugin implements Listener {
         String primaryName = usage.split("\\s+", 2)[0];
         commandRegistry.register("CivicCore", primaryName, category, usage, description,
                 requiresCharacter, aliases, additionalHelp, action);
+    }
+
+    private void handleWallFitCommand(Player player, String[] parts) {
+        if (parts.length > 2) throw new IllegalArgumentException("Use /wallfit, /wallfit on, /wallfit off, or /wallfit status.");
+        String uid = player.getUID();
+        boolean enabled = wallFitEnabledPlayers.contains(uid);
+        if (parts.length == 1) enabled = !enabled;
+        else {
+            switch (parts[1].toLowerCase(Locale.US)) {
+                case "on" -> enabled = true;
+                case "off" -> enabled = false;
+                case "status" -> {
+                    player.sendTextMessage("<color=#E8C547>Automatic wall fitting is "
+                            + (enabled ? "enabled" : "disabled") + ".</color>");
+                    return;
+                }
+                default -> throw new IllegalArgumentException("Choose on, off, or status.");
+            }
+        }
+        if (enabled) wallFitEnabledPlayers.add(uid);
+        else wallFitEnabledPlayers.remove(uid);
+        player.sendTextMessage("<color=" + (enabled ? "#77FF99" : "#AAAAAA")
+                + ">Automatic wall fitting " + (enabled ? "enabled" : "disabled") + ".</color>");
     }
 
     private void handleSpawnCommand(Player player, String[] parts) {
