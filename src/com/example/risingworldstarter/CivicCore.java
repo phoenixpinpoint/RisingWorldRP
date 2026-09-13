@@ -3766,7 +3766,8 @@ public final class CivicCore extends Plugin implements Listener {
         view.itemsByButtonId().clear();
         view.incrementByButtonId().clear();
         view.decrementByButtonId().clear();
-        view.quantityLabels().clear();
+        view.quantityFields().clear();
+        view.itemsByQuantityFieldId().clear();
         view.cartStatusLabels().clear();
         int itemIndex = 0;
         float yOffset = 0f;
@@ -3825,15 +3826,22 @@ public final class CivicCore extends Plugin implements Listener {
 
             int quantity = !outOfStock && view.cart().containsKey(storeItem.id())
                     ? view.cart().get(storeItem.id()).quantity() : 0;
-            UILabel quantityLabel = new UILabel(Integer.toString(quantity));
-            quantityLabel.setPosition(452f, 20f, false);
-            quantityLabel.setSize(56f, 46f, false);
-            quantityLabel.setFontSize(18f);
-            quantityLabel.setFontColor((int) 0xFFFFFFFFL);
-            quantityLabel.setTextAlign(TextAnchor.MiddleCenter);
-            quantityLabel.setBackgroundColor((int) 0x11161DFFL);
-            itemRow.addChild(quantityLabel);
-            view.quantityLabels().put(storeItem.id(), quantityLabel);
+            UITextField quantityField = new UITextField(Integer.toString(quantity));
+            quantityField.setPosition(452f, 20f, false);
+            quantityField.setSize(56f, 46f, false);
+            quantityField.setFontSize(18f);
+            quantityField.setFontColor((int) 0xFFFFFFFFL);
+            quantityField.setBackgroundColor((int) 0x11161DFFL);
+            quantityField.setBorder(1f);
+            quantityField.setBorderColor((int) 0x566273FFL);
+            quantityField.setBorderEdgeRadius(4f, false);
+            quantityField.setMaxCharacters(2);
+            quantityField.setReadOnly(outOfStock);
+            quantityField.style.textAlign.set(TextAnchor.MiddleCenter);
+            quantityField.updateStyle();
+            itemRow.addChild(quantityField);
+            view.quantityFields().put(storeItem.id(), quantityField);
+            if (!outOfStock) view.itemsByQuantityFieldId().put(quantityField.getID(), storeItem);
 
             UILabel plusButton = createCartQuantityButton("+");
             plusButton.setPosition(518f, 20f, false);
@@ -3894,14 +3902,19 @@ public final class CivicCore extends Plugin implements Listener {
     private void changeCartQuantity(StoreView view, StoreCatalog.StoreItem item, int delta) {
         int oldQuantity = view.cart().containsKey(item.id()) ? view.cart().get(item.id()).quantity() : 0;
         int newQuantity = Math.max(0, Math.min(99, oldQuantity + delta));
+        setCartQuantity(view, item, newQuantity, true);
+    }
+
+    private void setCartQuantity(StoreView view, StoreCatalog.StoreItem item, int newQuantity,
+                                 boolean updateField) {
         if (newQuantity == 0) {
             view.cart().remove(item.id());
         } else {
             view.cart().put(item.id(), new CartLine(item, newQuantity));
         }
-        UILabel quantityLabel = view.quantityLabels().get(item.id());
-        if (quantityLabel != null) {
-            quantityLabel.setText(Integer.toString(newQuantity));
+        UITextField quantityField = view.quantityFields().get(item.id());
+        if (updateField && quantityField != null) {
+            quantityField.setText(Integer.toString(newQuantity));
         }
         UILabel statusLabel = view.cartStatusLabels().get(item.id());
         if (statusLabel != null) {
@@ -3922,7 +3935,7 @@ public final class CivicCore extends Plugin implements Listener {
 
     private void clearCart(StoreView view) {
         view.cart().clear();
-        view.quantityLabels().values().forEach(label -> label.setText("0"));
+        view.quantityFields().values().forEach(field -> field.setText("0"));
         view.cartStatusLabels().values().forEach(label -> label.setVisible(false));
         updateCartSummary(view);
     }
@@ -4278,9 +4291,29 @@ public final class CivicCore extends Plugin implements Listener {
             return;
         }
         StoreView view = storeViews.get(event.getPlayer().getUID());
-        if (view == null || event.getUITextField().getID() != view.searchField().getID()) {
+        if (view == null) {
             return;
         }
+        StoreCatalog.StoreItem quantityItem = view.itemsByQuantityFieldId()
+                .get(event.getUITextField().getID());
+        if (quantityItem != null) {
+            String entered = event.getNewText() == null ? "" : event.getNewText().trim();
+            if (entered.isEmpty()) {
+                setCartQuantity(view, quantityItem, 0, false);
+                return;
+            }
+            try {
+                if (!entered.matches("\\d{1,2}")) throw new NumberFormatException();
+                int quantity = Integer.parseInt(entered);
+                setCartQuantity(view, quantityItem, quantity, false);
+            } catch (NumberFormatException ignored) {
+                int current = view.cart().containsKey(quantityItem.id())
+                        ? view.cart().get(quantityItem.id()).quantity() : 0;
+                event.getUITextField().setText(Integer.toString(current));
+            }
+            return;
+        }
+        if (event.getUITextField().getID() != view.searchField().getID()) return;
         String search = event.getNewText() == null ? "" : event.getNewText();
         view.setSearchText(search.trim().toLowerCase(Locale.US));
         rebuildStoreItems(view);
@@ -4304,7 +4337,8 @@ public final class CivicCore extends Plugin implements Listener {
         private final Map<Integer, StoreCatalog.StoreItem> itemsByButtonId = new ConcurrentHashMap<>();
         private final Map<Integer, StoreCatalog.StoreItem> incrementByButtonId = new ConcurrentHashMap<>();
         private final Map<Integer, StoreCatalog.StoreItem> decrementByButtonId = new ConcurrentHashMap<>();
-        private final Map<Short, UILabel> quantityLabels = new ConcurrentHashMap<>();
+        private final Map<Short, UITextField> quantityFields = new ConcurrentHashMap<>();
+        private final Map<Integer, StoreCatalog.StoreItem> itemsByQuantityFieldId = new ConcurrentHashMap<>();
         private final Map<Short, UILabel> cartStatusLabels = new ConcurrentHashMap<>();
         private final Map<Short, CartLine> cart = new ConcurrentHashMap<>();
         private final Map<Integer, String> categoriesByButtonId = new ConcurrentHashMap<>();
@@ -4334,7 +4368,8 @@ public final class CivicCore extends Plugin implements Listener {
         private Map<Integer, StoreCatalog.StoreItem> itemsByButtonId() { return itemsByButtonId; }
         private Map<Integer, StoreCatalog.StoreItem> incrementByButtonId() { return incrementByButtonId; }
         private Map<Integer, StoreCatalog.StoreItem> decrementByButtonId() { return decrementByButtonId; }
-        private Map<Short, UILabel> quantityLabels() { return quantityLabels; }
+        private Map<Short, UITextField> quantityFields() { return quantityFields; }
+        private Map<Integer, StoreCatalog.StoreItem> itemsByQuantityFieldId() { return itemsByQuantityFieldId; }
         private Map<Short, UILabel> cartStatusLabels() { return cartStatusLabels; }
         private Map<Short, CartLine> cart() { return cart; }
         private Map<Integer, String> categoriesByButtonId() { return categoriesByButtonId; }
