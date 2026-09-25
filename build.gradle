@@ -81,6 +81,7 @@ sourceSets {
         java.include 'com/example/risingworldstarter/spawns/**'
         java.include 'com/example/risingworldstarter/userstore/**'
         java.include 'com/example/risingworldstarter/tests/**'
+        java.include 'com/example/risingworldstarter/wallfit/WallFitGeometry.java'
         resources.srcDirs = ['src']
         resources.include 'com/example/risingworldstarter/database/schema.sql'
     }

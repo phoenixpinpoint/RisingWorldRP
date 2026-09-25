@@ -42,6 +42,12 @@ The finished plugin is `build/CivicCore.jar`.
 
 ## Install for testing
 
+Fully exit Rising World (or stop the dedicated server) before installing. Replacing
+the JAR while the process is running can cause missing-class and unreadable-resource
+errors, including `NoClassDefFoundError` and `Could not load database schema`.
+Returning to the main menu is not sufficient; restart the entire process if this
+happens.
+
 Run this to build and install it into Rising World's `Plugins/CivicCore` directory:
 
 ```text
@@ -77,6 +83,18 @@ character.
 
 Use `/commands` to open the categorized command browser, or `/help` to print the
 same registered commands in chat.
+
+Use `/wallfit on` to align individual rectangular wall placements with nearby
+walls. Two aligned neighbors define a gap to fill; one neighbor provides an
+endpoint to extend while keeping the proposed length. The fit preserves height,
+thickness, and elevation, and does not require a supporting slab. It adjusts the
+position and rotation when you place the piece, not the live placement preview.
+
+Snapping allows up to 10 degrees of rotation, 0.3 units of sideways offset, and
+0.75 units of total movement. Gap filling changes length by at most 20 percent
+or 0.5 units, whichever is smaller. Conflicting wall lines, overlapping results,
+and placements without a nearby matching endpoint remain unchanged. Wall fit
+defaults to off each session; use `/wallfit off` or `/wallfit status` to control it.
 
 Use `/spawn` to return to the server spawn. Each character can also save up to
 three private teleport locations with `/setspawn <name>`, view them with

@@ -990,7 +990,7 @@ public final class CivicCore extends Plugin implements Listener {
         registerCommand("Building", "/highlightblocks", "Toggle outlines around small construction pieces in your current chunk.",
                 true, List.of("/highlightpieces", "/highlightselected", "/blocks"),
                 (player, parts) -> toggleConstructionHighlights(player));
-        registerCommand("Building", "/wallfit [on|off|status]", "Toggle automatic fitting of walls to small foundation gaps.",
+        registerCommand("Building", "/wallfit [on|off|status]", "Toggle automatic alignment and fitting to neighboring walls.",
                 true, List.of(), this::handleWallFitCommand);
         registerCommand("Building", "/removehighlighted", "Prepare the highlighted construction piece under your crosshair for a sledgehammer hit.",
                 true, List.of("/removehighlight", "/removehighlightedblock"),
