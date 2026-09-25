@@ -1,10 +1,11 @@
 package com.example.risingworldstarter.userstore;
 
 import com.example.risingworldstarter.database.Database;
+import com.example.risingworldstarter.database.DocumentStore;
+import com.example.risingworldstarter.database.MongoSchema;
+import org.bson.Document;
+import static com.example.risingworldstarter.database.DocumentStore.*;
 
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -20,48 +21,29 @@ public final class UserStoreService {
                                    int variant, int quantity, long price) {
         if (quantity <= 0) throw new IllegalArgumentException("Quantity must be greater than zero.");
         if (price <= 0) throw new IllegalArgumentException("Price must be greater than zero.");
-        return database.transaction(connection -> {
-            try (PreparedStatement insert = connection.prepareStatement(
-                    "INSERT INTO user_store_listings(seller_key,seller_name,item_type,item_variant,quantity,price) "
-                            + "VALUES(?,?,?,?,?,?)", Statement.RETURN_GENERATED_KEYS)) {
-                insert.setString(1, sellerKey); insert.setString(2, sellerName);
-                insert.setInt(3, Short.toUnsignedInt(itemType)); insert.setInt(4, variant);
-                insert.setInt(5, quantity); insert.setLong(6, price); insert.executeUpdate();
-                try (ResultSet keys = insert.getGeneratedKeys()) {
-                    if (!keys.next()) throw new IllegalStateException("Could not create user-store listing.");
-                    return new UserStoreListing(keys.getLong(1), sellerKey, sellerName,
-                            itemType, variant, quantity, price);
-                }
-            }
+        return database.transaction(s -> {
+            UserStoreListing listing = new UserStoreListing(s.nextId("user_store_listings"), sellerKey, sellerName, itemType, variant, quantity, price);
+            insert(s, listing);
+            return listing;
         });
     }
 
-    public List<UserStoreListing> getListings() { return database.read(connection -> {
-        List<UserStoreListing> result = new ArrayList<>();
-        try (PreparedStatement query = connection.prepareStatement(
-                "SELECT listing_id,seller_key,seller_name,item_type,item_variant,quantity,price "
-                        + "FROM user_store_listings ORDER BY created_at,listing_id");
-             ResultSet rows = query.executeQuery()) {
-            while (rows.next()) result.add(read(rows));
-        }
-        return List.copyOf(result);
-    }); }
+    public List<UserStoreListing> getListings() {
+        return database.read(s -> s.find("user_store_listings", doc(), doc("listing_id", 1)).stream()
+                .map(UserStoreService::read).toList());
+    }
 
-    public Set<Short> getListedItemTypes() { return database.read(connection -> {
-        Set<Short> result = new HashSet<>();
-        try (PreparedStatement query = connection.prepareStatement(
-                "SELECT DISTINCT item_type FROM user_store_listings"); ResultSet rows = query.executeQuery()) {
-            while (rows.next()) result.add((short) rows.getInt(1));
-        }
-        return Set.copyOf(result);
-    }); }
+    public Set<Short> getListedItemTypes() {
+        return database.read(s -> {
+            Set<Short> result = new HashSet<>();
+            for (Document d : s.find("user_store_listings", doc())) result.add((short) number(d, "item_type"));
+            return Set.copyOf(result);
+        });
+    }
 
-    public boolean hasListings(String sellerKey) { return database.read(connection -> {
-        try (PreparedStatement query = connection.prepareStatement(
-                "SELECT 1 FROM user_store_listings WHERE seller_key=? LIMIT 1")) {
-            query.setString(1, sellerKey); try (ResultSet row = query.executeQuery()) { return row.next(); }
-        }
-    }); }
+    public boolean hasListings(String sellerKey) {
+        return database.read(s -> s.exists("user_store_listings", doc("seller_key", sellerKey)));
+    }
 
     public Optional<UserStoreListing> cancel(long listingId, String sellerKey) {
         return database.transaction(connection -> {
@@ -92,35 +74,37 @@ public final class UserStoreService {
 
     /** Compensates a completed purchase when the buyer's inventory rejects the item. */
     public void reversePurchase(UserStoreListing listing, String buyerKey) {
-        database.transaction(connection -> {
-            long sellerBalance = balance(connection, listing.sellerKey());
-            if (sellerBalance < listing.price())
-                throw new IllegalStateException("Could not reverse marketplace settlement.");
-            setBalance(connection, listing.sellerKey(), sellerBalance - listing.price());
-            setBalance(connection, buyerKey, Math.addExact(balance(connection, buyerKey), listing.price()));
-            try (PreparedStatement insert = connection.prepareStatement(
-                    "INSERT INTO user_store_listings(listing_id,seller_key,seller_name,item_type,item_variant,quantity,price) VALUES(?,?,?,?,?,?,?)")) {
-                insert.setLong(1, listing.id()); insert.setString(2, listing.sellerKey());
-                insert.setString(3, listing.sellerName()); insert.setInt(4, Short.toUnsignedInt(listing.itemType()));
-                insert.setInt(5, listing.itemVariant()); insert.setInt(6, listing.quantity());
-                insert.setLong(7, listing.price()); insert.executeUpdate();
-            }
+        database.write(s -> {
+            long sellerBalance = balance(s, listing.sellerKey());
+            if (sellerBalance < listing.price()) throw new IllegalStateException("Could not reverse marketplace settlement.");
+            setBalance(s, listing.sellerKey(), sellerBalance - listing.price());
+            setBalance(s, buyerKey, Math.addExact(balance(s, buyerKey), listing.price()));
+            insert(s, listing);
             return null;
         });
     }
 
-    private static Optional<UserStoreListing> find(java.sql.Connection connection, long id) throws java.sql.SQLException {
-        try (PreparedStatement query = connection.prepareStatement(
-                "SELECT listing_id,seller_key,seller_name,item_type,item_variant,quantity,price FROM user_store_listings WHERE listing_id=?")) {
-            query.setLong(1, id); try (ResultSet row = query.executeQuery()) {
-                return row.next() ? Optional.of(read(row)) : Optional.empty();
-            }
-        }
+    private static void insert(DocumentStore s, UserStoreListing listing) {
+        s.insert("user_store_listings", doc("listing_id", listing.id(), "seller_key", listing.sellerKey(),
+                "seller_name", listing.sellerName(), "item_type", Short.toUnsignedInt(listing.itemType()),
+                "item_variant", listing.itemVariant(), "quantity", listing.quantity(), "price", listing.price(),
+                "created_at", java.time.Instant.now().toString()));
     }
-    private static UserStoreListing read(ResultSet row) throws java.sql.SQLException { return new UserStoreListing(
-            row.getLong(1), row.getString(2), row.getString(3), (short) row.getInt(4),
-            row.getInt(5), row.getInt(6), row.getLong(7)); }
-    private static void delete(java.sql.Connection c,long id)throws java.sql.SQLException{try(PreparedStatement q=c.prepareStatement("DELETE FROM user_store_listings WHERE listing_id=?")){q.setLong(1,id);if(q.executeUpdate()==0)throw new IllegalStateException("That listing is no longer available.");}}
-    private static long balance(java.sql.Connection c,String id)throws java.sql.SQLException{try(PreparedStatement q=c.prepareStatement("SELECT balance FROM balances WHERE account_id=?")){q.setString(1,id);try(ResultSet r=q.executeQuery()){return r.next()?r.getLong(1):0L;}}}
-    private static void setBalance(java.sql.Connection c,String id,long value)throws java.sql.SQLException{try(PreparedStatement q=c.prepareStatement("INSERT INTO balances(account_id,balance) VALUES(?,?) ON CONFLICT(account_id) DO UPDATE SET balance=excluded.balance")){q.setString(1,id);q.setLong(2,value);q.executeUpdate();}}
+    private static Optional<UserStoreListing> find(DocumentStore connection, long id) {
+        return connection.first("user_store_listings", doc("listing_id", id)).map(UserStoreService::read);
+    }
+    private static UserStoreListing read(Document row) {
+        return new UserStoreListing(number(row, "listing_id"), row.getString("seller_key"), row.getString("seller_name"),
+                (short) number(row, "item_type"), (int) number(row, "item_variant"), (int) number(row, "quantity"), number(row, "price"));
+    }
+    private static void delete(DocumentStore c,long id){
+        if (c.delete("user_store_listings", doc("listing_id", id)) == 0)
+            throw new IllegalStateException("That listing is no longer available.");
+    }
+    private static long balance(DocumentStore c,String id){
+        return DocumentStore.balance(c, id);
+    }
+    private static void setBalance(DocumentStore c,String id,long value){
+        DocumentStore.balance(c, id, value);
+    }
 }

@@ -1,10 +1,11 @@
 package com.example.risingworldstarter.journal;
 
 import com.example.risingworldstarter.database.Database;
+import com.example.risingworldstarter.database.DocumentStore;
+import com.example.risingworldstarter.database.MongoSchema;
+import org.bson.Document;
+import static com.example.risingworldstarter.database.DocumentStore.*;
 
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -19,14 +20,8 @@ public final class JournalService {
     /** Ensures a journal has at least one section and page and returns its sections. */
     public List<JournalSection> open(String characterKey) {
         requireCharacter(characterKey);
-        database.transaction(connection -> {
-            try (PreparedStatement query = connection.prepareStatement(
-                    "SELECT 1 FROM journal_sections WHERE character_key=? LIMIT 1")) {
-                query.setString(1, characterKey);
-                try (ResultSet rows = query.executeQuery()) {
-                    if (!rows.next()) createSection(connection, characterKey, "Notes");
-                }
-            }
+        database.write(s -> {
+            if (!s.exists("journal_sections", doc("character_key", characterKey))) createSection(s, characterKey, "Notes");
             return null;
         });
         return getSections(characterKey);
@@ -34,19 +29,8 @@ public final class JournalService {
 
     public List<JournalSection> getSections(String characterKey) {
         requireCharacter(characterKey);
-        return database.read(connection -> {
-            List<JournalSection> result = new ArrayList<>();
-            try (PreparedStatement query = connection.prepareStatement(
-                    "SELECT section_id,title,section_order FROM journal_sections "
-                            + "WHERE character_key=? ORDER BY section_order")) {
-                query.setString(1, characterKey);
-                try (ResultSet rows = query.executeQuery()) {
-                    while (rows.next()) result.add(new JournalSection(
-                            rows.getLong(1), rows.getString(2), rows.getInt(3)));
-                }
-            }
-            return List.copyOf(result);
-        });
+        return database.read(s -> s.find("journal_sections", doc("character_key", characterKey), doc("section_order", 1))
+                .stream().map(d -> new JournalSection(number(d, "section_id"), d.getString("title"), (int) number(d, "section_order"))).toList());
     }
 
     public JournalSection createSection(String characterKey, String title) {
@@ -56,32 +40,19 @@ public final class JournalService {
     }
 
     public List<JournalPage> getPages(String characterKey, long sectionId) {
-        return database.read(connection -> {
-            requireOwnedSection(connection, characterKey, sectionId);
-            List<JournalPage> result = new ArrayList<>();
-            try (PreparedStatement query = connection.prepareStatement(
-                    "SELECT page_id,page_number,content FROM journal_pages "
-                            + "WHERE section_id=? ORDER BY page_number")) {
-                query.setLong(1, sectionId);
-                try (ResultSet rows = query.executeQuery()) {
-                    while (rows.next()) result.add(new JournalPage(rows.getLong(1), sectionId,
-                            rows.getInt(2), rows.getString(3)));
-                }
-            }
-            return List.copyOf(result);
+        return database.read(s -> {
+            requireOwnedSection(s, characterKey, sectionId);
+            return s.find("journal_pages", doc("section_id", sectionId), doc("page_number", 1)).stream()
+                    .map(d -> new JournalPage(number(d, "page_id"), sectionId, (int) number(d, "page_number"), d.getString("content"))).toList();
         });
     }
 
     public JournalPage createPage(String characterKey, long sectionId) {
-        return database.transaction(connection -> {
-            requireOwnedSection(connection, characterKey, sectionId);
-            int pageNumber;
-            try (PreparedStatement query = connection.prepareStatement(
-                    "SELECT COALESCE(MAX(page_number),0)+1 FROM journal_pages WHERE section_id=?")) {
-                query.setLong(1, sectionId);
-                try (ResultSet row = query.executeQuery()) { pageNumber = row.getInt(1); }
-            }
-            return insertPage(connection, sectionId, pageNumber);
+        return database.transaction(s -> {
+            requireOwnedSection(s, characterKey, sectionId);
+            int next = s.find("journal_pages", doc("section_id", sectionId)).stream()
+                    .mapToInt(d -> (int) number(d, "page_number")).max().orElse(0) + 1;
+            return insertPage(s, sectionId, next);
         });
     }
 
@@ -89,73 +60,45 @@ public final class JournalService {
         String normalized = content == null ? "" : content;
         if (normalized.length() > MAX_PAGE_CHARACTERS)
             throw new IllegalArgumentException("Journal pages cannot exceed " + MAX_PAGE_CHARACTERS + " characters.");
-        database.write(connection -> {
-            try (PreparedStatement update = connection.prepareStatement(
-                    "UPDATE journal_pages SET content=? WHERE page_id=? AND section_id IN "
-                            + "(SELECT section_id FROM journal_sections WHERE character_key=?)")) {
-                update.setString(1, normalized); update.setLong(2, pageId); update.setString(3, characterKey);
-                if (update.executeUpdate() == 0) throw new IllegalStateException("Journal page no longer exists.");
-            }
+        database.write(s -> {
+            Document page = s.first("journal_pages", doc("page_id", pageId))
+                    .orElseThrow(() -> new IllegalStateException("Journal page no longer exists."));
+            requireOwnedSection(s, characterKey, number(page, "section_id"));
+            s.update("journal_pages", doc("page_id", pageId), doc("content", normalized));
             return null;
         });
     }
 
     public int deleteJournal(String characterKey) {
         requireCharacter(characterKey);
-        return database.transaction(connection -> {
-            try (PreparedStatement delete = connection.prepareStatement(
-                    "DELETE FROM journal_sections WHERE character_key=?")) {
-                delete.setString(1, characterKey);
-                return delete.executeUpdate();
-            }
+        return database.transaction(s -> {
+            for (Document d : s.find("journal_sections", doc("character_key", characterKey)))
+                s.delete("journal_pages", doc("section_id", number(d, "section_id")));
+            return Math.toIntExact(s.delete("journal_sections", doc("character_key", characterKey)));
         });
     }
 
-    private static JournalSection createSection(java.sql.Connection connection, String characterKey,
-                                                 String title) throws java.sql.SQLException {
-        int order;
-        try (PreparedStatement query = connection.prepareStatement(
-                "SELECT COALESCE(MAX(section_order),0)+1 FROM journal_sections WHERE character_key=?")) {
-            query.setString(1, characterKey);
-            try (ResultSet row = query.executeQuery()) { order = row.getInt(1); }
-        }
-        long id;
-        try (PreparedStatement insert = connection.prepareStatement(
-                "INSERT INTO journal_sections(character_key,title,section_order) VALUES(?,?,?)",
-                Statement.RETURN_GENERATED_KEYS)) {
-            insert.setString(1, characterKey); insert.setString(2, title); insert.setInt(3, order);
-            insert.executeUpdate();
-            try (ResultSet keys = insert.getGeneratedKeys()) {
-                if (!keys.next()) throw new IllegalStateException("Could not create journal section.");
-                id = keys.getLong(1);
-            }
-        }
+    private static JournalSection createSection(DocumentStore connection, String characterKey,
+                                                 String title) {
+        int order = connection.find("journal_sections", doc("character_key", characterKey)).stream()
+                .mapToInt(d -> (int) number(d, "section_order")).max().orElse(0) + 1;
+        long id = connection.nextId("journal_sections");
+        connection.insert("journal_sections", doc("section_id", id, "character_key", characterKey, "title", title, "section_order", order));
         insertPage(connection, id, 1);
         return new JournalSection(id, title, order);
     }
 
-    private static JournalPage insertPage(java.sql.Connection connection, long sectionId,
-                                          int pageNumber) throws java.sql.SQLException {
-        try (PreparedStatement insert = connection.prepareStatement(
-                "INSERT INTO journal_pages(section_id,page_number,content) VALUES(?,?,'')",
-                Statement.RETURN_GENERATED_KEYS)) {
-            insert.setLong(1, sectionId); insert.setInt(2, pageNumber); insert.executeUpdate();
-            try (ResultSet keys = insert.getGeneratedKeys()) {
-                if (!keys.next()) throw new IllegalStateException("Could not create journal page.");
-                return new JournalPage(keys.getLong(1), sectionId, pageNumber, "");
-            }
-        }
+    private static JournalPage insertPage(DocumentStore connection, long sectionId,
+                                          int pageNumber) {
+        long id = connection.nextId("journal_pages");
+        connection.insert("journal_pages", doc("page_id", id, "section_id", sectionId, "page_number", pageNumber, "content", ""));
+        return new JournalPage(id, sectionId, pageNumber, "");
     }
 
-    private static void requireOwnedSection(java.sql.Connection connection, String characterKey,
-                                            long sectionId) throws java.sql.SQLException {
-        try (PreparedStatement query = connection.prepareStatement(
-                "SELECT 1 FROM journal_sections WHERE section_id=? AND character_key=?")) {
-            query.setLong(1, sectionId); query.setString(2, characterKey);
-            try (ResultSet row = query.executeQuery()) {
-                if (!row.next()) throw new IllegalStateException("Journal section no longer exists.");
-            }
-        }
+    private static void requireOwnedSection(DocumentStore connection, String characterKey,
+                                            long sectionId) {
+        if (!connection.exists("journal_sections", doc("section_id", sectionId, "character_key", characterKey)))
+            throw new IllegalStateException("Journal section no longer exists.");
     }
 
     private static String requireTitle(String title) {

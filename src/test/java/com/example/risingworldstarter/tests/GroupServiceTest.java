@@ -10,7 +10,7 @@ import java.util.Base64;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-final class GroupServiceTest extends SqliteTestSupport {
+final class GroupServiceTest extends MongoTestSupport {
     @Test void creatorIsPersistedAsOwnerAndManagerCanUseTreasury() {
         var economy = new DatabaseEconomyService(database);
         var groups = new GroupService(database);

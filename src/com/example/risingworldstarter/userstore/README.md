@@ -7,4 +7,5 @@ the price is transferred atomically from buyer to seller. Sellers can cancel
 their own listings from the dialog to reclaim the escrowed items.
 
 While any user listing exists for an item type, that item is shown as out of
-stock in the configured normal store. Listings are stored in `civiccore.db`.
+stock in the configured normal store. Listings are stored in world-scoped
+MongoDB Atlas collections; settlement and listing removal commit together.

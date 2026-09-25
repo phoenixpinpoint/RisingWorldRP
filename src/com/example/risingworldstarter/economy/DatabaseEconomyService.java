@@ -1,13 +1,15 @@
 package com.example.risingworldstarter.economy;
 
 import com.example.risingworldstarter.database.Database;
+import com.example.risingworldstarter.database.DocumentStore;
+import com.example.risingworldstarter.database.MongoSchema;
+import org.bson.Document;
+import static com.example.risingworldstarter.database.DocumentStore.*;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.util.Properties;
 
 public final class DatabaseEconomyService implements EconomyApi {
@@ -21,14 +23,9 @@ public final class DatabaseEconomyService implements EconomyApi {
     public long createAccount(String playerUid, long initialBalance) {
         requireNonNegative(initialBalance, "initialBalance");
         String uid = requireUid(playerUid);
-        return database.transaction(connection -> {
-            try (PreparedStatement insert = connection.prepareStatement(
-                    "INSERT INTO balances(account_id, balance) VALUES (?, ?) ON CONFLICT(account_id) DO NOTHING")) {
-                insert.setString(1, uid);
-                insert.setLong(2, initialBalance);
-                insert.executeUpdate();
-            }
-            return selectBalance(connection, uid);
+        return database.transaction(store -> {
+            store.insertIfAbsent("balances", doc("account_id", uid), doc("balance", initialBalance));
+            return balance(store, uid);
         });
     }
 
@@ -41,13 +38,7 @@ public final class DatabaseEconomyService implements EconomyApi {
     @Override
     public boolean hasAccount(String playerUid) {
         String uid = requireUid(playerUid);
-        return database.read(connection -> {
-            try (PreparedStatement query = connection.prepareStatement(
-                    "SELECT 1 FROM balances WHERE account_id = ?")) {
-                query.setString(1, uid);
-                try (ResultSet result = query.executeQuery()) { return result.next(); }
-            }
-        });
+        return database.read(store -> store.exists("balances", doc("account_id", uid)));
     }
 
     @Override
@@ -83,34 +74,20 @@ public final class DatabaseEconomyService implements EconomyApi {
     @Override
     public boolean deleteAccount(String playerUid) {
         String uid = requireUid(playerUid);
-        return database.transaction(connection -> {
-            try (PreparedStatement delete = connection.prepareStatement(
-                    "DELETE FROM balances WHERE account_id = ?")) {
-                delete.setString(1, uid);
-                return delete.executeUpdate() > 0;
-            }
-        });
+        return database.transaction(store -> store.delete("balances", doc("account_id", uid)) > 0);
     }
 
     public void migrateLegacy(Path dataFile) {
         if (!Files.isRegularFile(dataFile)) return;
         Properties properties = new Properties();
-        try (InputStream input = Files.newInputStream(dataFile)) {
-            properties.load(input);
-        } catch (IOException exception) {
-            throw new IllegalStateException("Could not migrate balances from " + dataFile, exception);
-        }
-        database.transaction(connection -> {
+        try (InputStream input = Files.newInputStream(dataFile)) { properties.load(input); }
+        catch (IOException exception) { throw new IllegalStateException("Could not migrate balances", exception); }
+        database.write(store -> {
             for (String uid : properties.stringPropertyNames()) {
-                long balance;
-                try { balance = Long.parseLong(properties.getProperty(uid)); }
-                catch (NumberFormatException ignored) { continue; }
-                try (PreparedStatement insert = connection.prepareStatement(
-                        "INSERT INTO balances(account_id, balance) VALUES (?, ?) ON CONFLICT(account_id) DO NOTHING")) {
-                    insert.setString(1, uid);
-                    insert.setLong(2, Math.max(0L, balance));
-                    insert.executeUpdate();
-                }
+                try {
+                    long value = Math.max(0, Long.parseLong(properties.getProperty(uid)));
+                    store.insertIfAbsent("balances", doc("account_id", uid), doc("balance", value));
+                } catch (NumberFormatException ignored) { }
             }
             return null;
         });
@@ -120,22 +97,12 @@ public final class DatabaseEconomyService implements EconomyApi {
         database.write(connection -> { upsert(connection, uid, amount); return null; });
     }
 
-    private static void upsert(java.sql.Connection connection, String uid, long amount) throws java.sql.SQLException {
-        try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO balances(account_id, balance) VALUES (?, ?) "
-                        + "ON CONFLICT(account_id) DO UPDATE SET balance = excluded.balance")) {
-            statement.setString(1, uid);
-            statement.setLong(2, amount);
-            statement.executeUpdate();
-        }
+    private static void upsert(DocumentStore connection, String uid, long amount) {
+        balance(connection, uid, amount);
     }
 
-    private static long selectBalance(java.sql.Connection connection, String uid) throws java.sql.SQLException {
-        try (PreparedStatement query = connection.prepareStatement(
-                "SELECT balance FROM balances WHERE account_id = ?")) {
-            query.setString(1, uid);
-            try (ResultSet result = query.executeQuery()) { return result.next() ? result.getLong(1) : 0L; }
-        }
+    private static long selectBalance(DocumentStore connection, String uid) {
+        return balance(connection, uid);
     }
 
     private static String requireUid(String value) {

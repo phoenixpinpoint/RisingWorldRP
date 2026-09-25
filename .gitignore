@@ -36,3 +36,5 @@ build-coverage/
 .vscode/
 
 config/build.config.json
+config/mongodb.properties
+.env

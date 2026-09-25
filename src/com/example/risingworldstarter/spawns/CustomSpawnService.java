@@ -1,8 +1,11 @@
 package com.example.risingworldstarter.spawns;
 
 import com.example.risingworldstarter.database.Database;
+import com.example.risingworldstarter.database.DocumentStore;
+import com.example.risingworldstarter.database.MongoSchema;
+import org.bson.Document;
+import static com.example.risingworldstarter.database.DocumentStore.*;
 
-import java.sql.PreparedStatement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -17,102 +20,48 @@ public final class CustomSpawnService {
 
     public void save(String characterKey, String requestedName, float x, float y, float z,
                      float rotationX, float rotationY, float rotationZ, float rotationW) {
-        String key = requireCharacter(characterKey);
-        String name = requireName(requestedName);
-        database.write(connection -> {
-            boolean exists;
-            try (PreparedStatement query = connection.prepareStatement(
-                    "SELECT 1 FROM custom_spawns WHERE character_key=? AND name=?")) {
-                query.setString(1, key); query.setString(2, name);
-                try (var row = query.executeQuery()) { exists = row.next(); }
-            }
-            if (!exists) {
-                try (PreparedStatement query = connection.prepareStatement(
-                        "SELECT COUNT(*) FROM custom_spawns WHERE character_key=?")) {
-                    query.setString(1, key);
-                    try (var row = query.executeQuery()) {
-                        row.next();
-                        if (row.getInt(1) >= MAX_SPAWNS)
-                            throw new IllegalStateException("You can only have " + MAX_SPAWNS + " custom spawns.");
-                    }
-                }
-            }
-            try (PreparedStatement statement = connection.prepareStatement(
-                    "INSERT INTO custom_spawns(character_key,name,position_x,position_y,position_z,"
-                            + "rotation_x,rotation_y,rotation_z,rotation_w) VALUES(?,?,?,?,?,?,?,?,?) "
-                            + "ON CONFLICT(character_key,name) DO UPDATE SET "
-                            + "position_x=excluded.position_x,position_y=excluded.position_y,"
-                            + "position_z=excluded.position_z,rotation_x=excluded.rotation_x,"
-                            + "rotation_y=excluded.rotation_y,rotation_z=excluded.rotation_z,"
-                            + "rotation_w=excluded.rotation_w")) {
-                statement.setString(1, key); statement.setString(2, name);
-                statement.setFloat(3, x); statement.setFloat(4, y); statement.setFloat(5, z);
-                statement.setFloat(6, rotationX); statement.setFloat(7, rotationY);
-                statement.setFloat(8, rotationZ); statement.setFloat(9, rotationW);
-                statement.executeUpdate();
-            }
+        String key = requireCharacter(characterKey), name = requireName(requestedName);
+        database.write(s -> {
+            Document filter = doc("character_key", key, "name_key", MongoSchema.nameKey(name));
+            if (!s.exists("custom_spawns", filter) && s.find("custom_spawns", doc("character_key", key)).size() >= MAX_SPAWNS)
+                throw new IllegalStateException("You can only have " + MAX_SPAWNS + " custom spawns.");
+            Document values = doc("position_x", (double) x, "position_y", (double) y, "position_z", (double) z,
+                    "rotation_x", (double) rotationX, "rotation_y", (double) rotationY,
+                    "rotation_z", (double) rotationZ, "rotation_w", (double) rotationW);
+            if (s.exists("custom_spawns", filter)) s.update("custom_spawns", filter, values);
+            else s.insertIfAbsent("custom_spawns", filter, values.append("name", name));
             return null;
         });
     }
 
     public Optional<CustomSpawn> find(String characterKey, String requestedName) {
-        String key = requireCharacter(characterKey);
-        String name = requireName(requestedName);
-        return database.read(connection -> {
-            try (PreparedStatement query = connection.prepareStatement(
-                    "SELECT name,position_x,position_y,position_z,rotation_x,rotation_y,rotation_z,rotation_w "
-                            + "FROM custom_spawns WHERE character_key=? AND name=?")) {
-                query.setString(1, key); query.setString(2, name);
-                try (var row = query.executeQuery()) {
-                    return row.next() ? Optional.of(readSpawn(row)) : Optional.empty();
-                }
-            }
-        });
+        String key = requireCharacter(characterKey), name = requireName(requestedName);
+        return database.read(s -> s.first("custom_spawns", doc("character_key", key, "name_key", MongoSchema.nameKey(name)))
+                .map(CustomSpawnService::readSpawn));
     }
 
     public List<CustomSpawn> getAll(String characterKey) {
         String key = requireCharacter(characterKey);
-        return database.read(connection -> {
-            List<CustomSpawn> spawns = new ArrayList<>();
-            try (PreparedStatement query = connection.prepareStatement(
-                    "SELECT name,position_x,position_y,position_z,rotation_x,rotation_y,rotation_z,rotation_w "
-                            + "FROM custom_spawns WHERE character_key=? ORDER BY name COLLATE NOCASE")) {
-                query.setString(1, key);
-                try (var rows = query.executeQuery()) {
-                    while (rows.next()) spawns.add(readSpawn(rows));
-                }
-            }
-            return List.copyOf(spawns);
-        });
+        return database.read(s -> s.find("custom_spawns", doc("character_key", key), doc("name_key", 1))
+                .stream().map(CustomSpawnService::readSpawn).toList());
     }
 
     public boolean delete(String characterKey, String requestedName) {
-        String key = requireCharacter(characterKey);
-        String name = requireName(requestedName);
-        return database.transaction(connection -> {
-            try (PreparedStatement statement = connection.prepareStatement(
-                    "DELETE FROM custom_spawns WHERE character_key=? AND name=?")) {
-                statement.setString(1, key); statement.setString(2, name);
-                return statement.executeUpdate() > 0;
-            }
-        });
+        String key = requireCharacter(characterKey), name = requireName(requestedName);
+        return database.transaction(s -> s.delete("custom_spawns", doc("character_key", key, "name_key", MongoSchema.nameKey(name))) > 0);
     }
 
     public int deleteAll(String characterKey) {
         String key = requireCharacter(characterKey);
-        return database.transaction(connection -> {
-            try (PreparedStatement statement = connection.prepareStatement(
-                    "DELETE FROM custom_spawns WHERE character_key=?")) {
-                statement.setString(1, key);
-                return statement.executeUpdate();
-            }
-        });
+        return database.transaction(s -> Math.toIntExact(s.delete("custom_spawns", doc("character_key", key))));
     }
 
-    private static CustomSpawn readSpawn(java.sql.ResultSet row) throws java.sql.SQLException {
-        return new CustomSpawn(row.getString(1), row.getFloat(2), row.getFloat(3), row.getFloat(4),
-                row.getFloat(5), row.getFloat(6), row.getFloat(7), row.getFloat(8));
+    private static CustomSpawn readSpawn(Document row) {
+        return new CustomSpawn(row.getString("name"), f(row, "position_x"), f(row, "position_y"), f(row, "position_z"),
+                f(row, "rotation_x"), f(row, "rotation_y"), f(row, "rotation_z"), f(row, "rotation_w"));
     }
+
+    private static float f(Document d, String key) { return ((Number) d.get(key)).floatValue(); }
 
     private static String requireCharacter(String value) {
         String key = value == null ? "" : value.trim();

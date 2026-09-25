@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-final class JournalServiceTest extends SqliteTestSupport {
+final class JournalServiceTest extends MongoTestSupport {
     @Test void sectionsAndOrderedPagesAreCharacterScoped() {
         var journals = new JournalService(database);
         var section = journals.createSection("one", "Plans");

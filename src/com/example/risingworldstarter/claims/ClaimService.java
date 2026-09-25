@@ -1,12 +1,14 @@
 package com.example.risingworldstarter.claims;
 
 import com.example.risingworldstarter.database.Database;
+import com.example.risingworldstarter.database.DocumentStore;
+import com.example.risingworldstarter.database.MongoSchema;
+import org.bson.Document;
+import static com.example.risingworldstarter.database.DocumentStore.*;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -20,69 +22,53 @@ public final class ClaimService {
     public ClaimService(Database database) { this.database = database; }
 
     public Optional<Claim> getClaim(int chunkX, int chunkZ) {
-        return database.read(connection -> {
-            try (PreparedStatement query = connection.prepareStatement("SELECT owner_id, owner_name FROM claims WHERE chunk_x=? AND chunk_z=?")) {
-                query.setInt(1, chunkX); query.setInt(2, chunkZ);
-                try (ResultSet result = query.executeQuery()) {
-                    return result.next() ? Optional.of(new Claim(result.getString(1), result.getString(2))) : Optional.empty();
-                }
-            }
-        });
+        return database.read(s -> s.first("claims", doc("chunk_x", chunkX, "chunk_z", chunkZ))
+                .map(d -> new Claim(d.getString("owner_id"), d.getString("owner_name"))));
     }
 
     public List<ClaimedChunk> getClaimsByOwner(String ownerUid) {
-        return database.read(connection -> {
-            List<ClaimedChunk> chunks = new ArrayList<>();
-            try (PreparedStatement query = connection.prepareStatement("SELECT chunk_x, chunk_z FROM claims WHERE owner_id=? ORDER BY chunk_x, chunk_z")) {
-                query.setString(1, ownerUid);
-                try (ResultSet result = query.executeQuery()) { while (result.next()) chunks.add(new ClaimedChunk(result.getInt(1), result.getInt(2))); }
-            }
-            return List.copyOf(chunks);
-        });
+        return database.read(s -> s.find("claims", doc("owner_id", ownerUid), doc("chunk_x", 1, "chunk_z", 1))
+                .stream().map(d -> new ClaimedChunk((int) number(d, "chunk_x"), (int) number(d, "chunk_z"))).toList());
     }
 
     /** Returns all claims inside an inclusive chunk-coordinate square in one query. */
     public Map<ClaimedChunk, Claim> getClaimsInArea(int minimumX, int maximumX,
                                                     int minimumZ, int maximumZ) {
-        return database.read(connection -> {
+        return database.read(s -> {
             Map<ClaimedChunk, Claim> result = new LinkedHashMap<>();
-            try (PreparedStatement query = connection.prepareStatement(
-                    "SELECT chunk_x,chunk_z,owner_id,owner_name FROM claims "
-                            + "WHERE chunk_x BETWEEN ? AND ? AND chunk_z BETWEEN ? AND ?")) {
-                query.setInt(1, minimumX); query.setInt(2, maximumX);
-                query.setInt(3, minimumZ); query.setInt(4, maximumZ);
-                try (ResultSet rows = query.executeQuery()) {
-                    while (rows.next()) result.put(new ClaimedChunk(rows.getInt(1), rows.getInt(2)),
-                            new Claim(rows.getString(3), rows.getString(4)));
-                }
-            }
+            for (Document d : s.find("claims", doc("chunk_x", doc("$gte", minimumX, "$lte", maximumX),
+                    "chunk_z", doc("$gte", minimumZ, "$lte", maximumZ))))
+                result.put(new ClaimedChunk((int) number(d, "chunk_x"), (int) number(d, "chunk_z")),
+                        new Claim(d.getString("owner_id"), d.getString("owner_name")));
             return Map.copyOf(result);
         });
     }
 
     public int getClaimCount() {
-        return database.read(connection -> { try (var query=connection.prepareStatement("SELECT COUNT(*) FROM claims"); var result=query.executeQuery()) { return result.getInt(1); } });
+        return database.read(s -> s.find("claims", doc()).size());
     }
 
     public int deleteClaimsByOwner(String ownerUid) {
-        return database.transaction(connection -> { try (PreparedStatement statement=connection.prepareStatement("DELETE FROM claims WHERE owner_id=?")) { statement.setString(1, ownerUid); return statement.executeUpdate(); } });
+        return database.transaction(s -> Math.toIntExact(s.delete("claims", doc("owner_id", ownerUid))));
     }
 
     public void migrateOwner(String oldOwnerUid, String newOwnerUid, String newOwnerName) {
-        database.write(connection -> { try (PreparedStatement statement=connection.prepareStatement("UPDATE claims SET owner_id=?, owner_name=? WHERE owner_id=?")) { statement.setString(1,newOwnerUid); statement.setString(2,newOwnerName); statement.setString(3,oldOwnerUid); statement.executeUpdate(); } return null; });
+        database.write(s -> { s.update("claims", doc("owner_id", oldOwnerUid),
+                doc("owner_id", newOwnerUid, "owner_name", newOwnerName)); return null; });
     }
 
     public boolean claim(int chunkX, int chunkZ, String ownerUid, String ownerName) {
-        requireText(ownerUid,"ownerUid"); requireText(ownerName,"ownerName");
-        return database.transaction(connection -> { try (PreparedStatement statement=connection.prepareStatement("INSERT INTO claims(chunk_x,chunk_z,owner_id,owner_name) VALUES(?,?,?,?) ON CONFLICT(chunk_x,chunk_z) DO NOTHING")) { statement.setInt(1,chunkX); statement.setInt(2,chunkZ); statement.setString(3,ownerUid); statement.setString(4,ownerName); return statement.executeUpdate()>0; } });
+        requireText(ownerUid, "ownerUid"); requireText(ownerName, "ownerName");
+        return database.transaction(s -> s.insertIfAbsent("claims", doc("chunk_x", chunkX, "chunk_z", chunkZ),
+                doc("owner_id", ownerUid, "owner_name", ownerName)));
     }
 
     public boolean unclaim(int chunkX, int chunkZ, String ownerUid) {
-        return database.transaction(connection -> { try (PreparedStatement statement=connection.prepareStatement("DELETE FROM claims WHERE chunk_x=? AND chunk_z=? AND owner_id=?")) { statement.setInt(1,chunkX); statement.setInt(2,chunkZ); statement.setString(3,ownerUid); return statement.executeUpdate()>0; } });
+        return database.transaction(s -> s.delete("claims", doc("chunk_x", chunkX, "chunk_z", chunkZ, "owner_id", ownerUid)) > 0);
     }
 
     public boolean forceUnclaim(int chunkX, int chunkZ) {
-        return database.transaction(connection -> { try (PreparedStatement statement=connection.prepareStatement("DELETE FROM claims WHERE chunk_x=? AND chunk_z=?")) { statement.setInt(1,chunkX); statement.setInt(2,chunkZ); return statement.executeUpdate()>0; } });
+        return database.transaction(s -> s.delete("claims", doc("chunk_x", chunkX, "chunk_z", chunkZ)) > 0);
     }
 
     public void migrateLegacy(Path file) {

@@ -12,7 +12,9 @@ import com.example.risingworldstarter.commands.CommandHelp;
 import com.example.risingworldstarter.commands.CommandRegistry;
 import com.example.risingworldstarter.commands.RegisteredCommand;
 import com.example.risingworldstarter.database.Database;
-import com.example.risingworldstarter.database.SqliteDatabase;
+import com.example.risingworldstarter.database.MongoDatabase;
+import com.example.risingworldstarter.database.MongoSettings;
+import com.example.risingworldstarter.database.SqliteMigrator;
 import com.example.risingworldstarter.economy.DatabaseEconomyService;
 import com.example.risingworldstarter.economy.EconomyApi;
 import com.example.risingworldstarter.economy.EconomySettings;
@@ -192,9 +194,8 @@ public final class CivicCore extends Plugin implements Listener {
         debug("Plugin data directory: " + pluginPath);
 
         Path worldFolder = World.getWorldFolder().toPath().toAbsolutePath().normalize();
-        // Keep persistent data directly in the game's world save. Steam Cloud
-        // synchronizes world content, but plugin-installation folders are not
-        // part of the portable save on every platform.
+        // Keep configuration, Atlas world identity, and migration sources with
+        // the world save. Live mutable state is stored remotely in Atlas.
         Path worldDataPath = worldFolder.resolve("CivicCore");
         debug("World-scoped data directory: " + worldDataPath);
         prepareWorldDataDirectory(pluginPath, worldDataPath);
@@ -204,68 +205,79 @@ public final class CivicCore extends Plugin implements Listener {
             return;
         }
 
-        database = new SqliteDatabase(worldDataPath.resolve("civiccore.db"));
-        DatabaseEconomyService databaseEconomy = new DatabaseEconomyService(database);
-        economy = databaseEconomy;
-        claims = new ClaimService(database);
-        claimAdmins = new ClaimAdminService(database);
-        chests = new ChestService(database);
-        groups = new GroupService(database);
-        journals = new JournalService(database);
-        customSpawns = new CustomSpawnService(database);
-        userStore = new UserStoreService(database);
-        characterService = new CharacterService(database);
-        groups.migrateLegacy(worldDataPath.resolve("groups.properties"));
-        if (LegacyStateMigrator.migrate(database, worldDataPath, databaseEconomy,
-                claims, claimAdmins, chests, characterService)) {
-            debug("Migrated legacy mutable state into civiccore.db; original files retained as backups");
-        }
-        debug("Database state loaded: " + claims.getClaimCount() + " claims, "
-                + claimAdmins.getAll().size() + " claim administrators");
-        windowTrimService = new WindowTrimService(CivicCore::debug);
-        debug("Window auto-trim service loaded");
-
-        Path economyConfigPath = worldDataPath.resolve("economy.properties");
-        economySettings = EconomySettings.load(economyConfigPath);
-        debug("Economy config loaded from " + economyConfigPath);
-        debug("Economy values: starting cash=" + formatBalance(economySettings.defaultBalance())
-                + ", claim cost=" + formatBalance(economySettings.claimCost())
-                + ", 8-hour salary=" + formatBalance(economySettings.baseSalary()));
-
-        // Item definitions are native game data and are not ready yet while a
-        // hosted world is starting. Loading them here can terminate the game
-        // process without a Java exception. Defer catalog creation until the
-        // first player has spawned, when the definition registry is available.
-        marketplaceConfigPath = worldDataPath.resolve("marketplace.json");
-        storeCatalog = StoreCatalog.empty();
-        storeCatalogLoaded = false;
-        debug("Marketplace config queued for world-ready loading from " + marketplaceConfigPath);
-
-        net.risingworld.api.objects.Time currentTime = Server.getGameTime();
-        lastSalaryPeriod = PayPeriod.from(currentTime);
-        debug(String.format(Locale.US, "World clock initialized: %d-%d-%d %02d:%02d",
-                currentTime.getYear(), currentTime.getMonth(), currentTime.getDay(),
-                currentTime.getHours(), currentTime.getMinutes()));
-        registerCommands();
-        registerEventListener(this);
-        debug("Event listener registered");
-        executeDelayed(0.5f, () -> {
-            for (Player player : Server.getAllPlayers()) {
-                if (player != null && player.isSpawned()
-                        && !activeCharacters.containsKey(player.getUID())) {
-                    initializeStoreCatalog();
-                    initializeCharacterSession(player);
-                }
+        MongoSettings mongo = MongoSettings.load(pluginPath, worldDataPath);
+        database = new MongoDatabase(mongo.uri(), mongo.database(), mongo.worldId());
+        try {
+            if (SqliteMigrator.migrate(database, worldDataPath.resolve("civiccore.db")))
+                debug("Imported SQLite world data into MongoDB Atlas; original database retained");
+            DatabaseEconomyService databaseEconomy = new DatabaseEconomyService(database);
+            economy = databaseEconomy;
+            claims = new ClaimService(database);
+            claimAdmins = new ClaimAdminService(database);
+            chests = new ChestService(database);
+            groups = new GroupService(database);
+            journals = new JournalService(database);
+            customSpawns = new CustomSpawnService(database);
+            userStore = new UserStoreService(database);
+            characterService = new CharacterService(database);
+            groups.migrateLegacy(worldDataPath.resolve("groups.properties"));
+            if (LegacyStateMigrator.migrate(database, worldDataPath, databaseEconomy,
+                    claims, claimAdmins, chests, characterService)) {
+                debug("Migrated legacy mutable state into MongoDB Atlas; original files retained as backups");
             }
-        });
-        worldClockTimer = new Timer(1f, 0f, -1, this::updateWorldClockLabels);
-        worldClockTimer.start();
-        characterAutosaveTimer = new Timer(60f, 60f, -1, this::saveActiveCharacters);
-        characterAutosaveTimer.start();
-        debug("World clock and payroll timer started; payroll runs at 00:00, 08:00, and 16:00");
-        debug("Commands registered: " + commandRegistry.getCommands().stream()
-                .map(RegisteredCommand::name).toList());
-        System.out.println("[CivicCore] Enabled on Rising World " + getGameVersion());
+            debug("Database state loaded: " + claims.getClaimCount() + " claims, "
+                    + claimAdmins.getAll().size() + " claim administrators");
+            windowTrimService = new WindowTrimService(CivicCore::debug);
+            debug("Window auto-trim service loaded");
+
+            Path economyConfigPath = worldDataPath.resolve("economy.properties");
+            economySettings = EconomySettings.load(economyConfigPath);
+            debug("Economy config loaded from " + economyConfigPath);
+            debug("Economy values: starting cash=" + formatBalance(economySettings.defaultBalance())
+                    + ", claim cost=" + formatBalance(economySettings.claimCost())
+                    + ", 8-hour salary=" + formatBalance(economySettings.baseSalary()));
+
+            // Item definitions are native game data and are not ready yet while a
+            // hosted world is starting. Loading them here can terminate the game
+            // process without a Java exception. Defer catalog creation until the
+            // first player has spawned, when the definition registry is available.
+            marketplaceConfigPath = worldDataPath.resolve("marketplace.json");
+            storeCatalog = StoreCatalog.empty();
+            storeCatalogLoaded = false;
+            debug("Marketplace config queued for world-ready loading from " + marketplaceConfigPath);
+
+            net.risingworld.api.objects.Time currentTime = Server.getGameTime();
+            lastSalaryPeriod = PayPeriod.from(currentTime);
+            debug(String.format(Locale.US, "World clock initialized: %d-%d-%d %02d:%02d",
+                    currentTime.getYear(), currentTime.getMonth(), currentTime.getDay(),
+                    currentTime.getHours(), currentTime.getMinutes()));
+            registerCommands();
+            registerEventListener(this);
+            debug("Event listener registered");
+            executeDelayed(0.5f, () -> {
+                for (Player player : Server.getAllPlayers()) {
+                    if (player != null && player.isSpawned()
+                            && !activeCharacters.containsKey(player.getUID())) {
+                        initializeStoreCatalog();
+                        initializeCharacterSession(player);
+                    }
+                }
+            });
+            worldClockTimer = new Timer(1f, 0f, -1, this::updateWorldClockLabels);
+            worldClockTimer.start();
+            characterAutosaveTimer = new Timer(60f, 60f, -1, this::saveActiveCharacters);
+            characterAutosaveTimer.start();
+            debug("World clock and payroll timer started; payroll runs at 00:00, 08:00, and 16:00");
+            debug("Commands registered: " + commandRegistry.getCommands().stream()
+                    .map(RegisteredCommand::name).toList());
+            System.out.println("[CivicCore] Enabled on Rising World " + getGameVersion());
+        } catch (RuntimeException failure) {
+            if (worldClockTimer != null) { worldClockTimer.kill(); worldClockTimer = null; }
+            if (characterAutosaveTimer != null) { characterAutosaveTimer.kill(); characterAutosaveTimer = null; }
+            database.close();
+            database = null;
+            throw failure;
+        }
     }
 
     private void prepareWorldDataDirectory(Path pluginPath, Path worldDataPath) {
@@ -380,6 +392,10 @@ public final class CivicCore extends Plugin implements Listener {
 
     @Override
     public void onDisable() {
+        if (characterAutosaveTimer != null) {
+            characterAutosaveTimer.kill();
+            characterAutosaveTimer = null;
+        }
         if (characterService != null) {
             saveActiveCharacters();
         }
@@ -3002,7 +3018,13 @@ public final class CivicCore extends Plugin implements Listener {
             skin.setEyeColor(nextColor(skin.getEyeColor(), EYE_COLORS));
         } else if (elementId == view.finish().getID() || elementId == view.close().getID()) {
             CharacterService.CharacterSummary active = activeCharacters.get(player.getUID());
-            if (active != null) characterService.saveCharacter(player, active);
+            if (active != null) {
+                try { characterService.saveCharacter(player, active); }
+                catch (RuntimeException failure) {
+                    System.err.println("[CivicCore] Could not save character " + active.id()
+                            + ": " + failure.getMessage());
+                }
+            }
             appearanceViews.remove(player.getUID());
             player.removeUIElement(view.window());
             player.hideInventory();

@@ -1,8 +1,7 @@
 # Groups and clans
 
-Clans, roles, memberships, and invitations are stored in the world-scoped
-`civiccore.db`. The canonical tables are in
-[`../database/schema.sql`](../database/schema.sql). Existing
+Clans, roles, memberships, and invitations are stored in world-scoped MongoDB
+collections. See the [database guide](../database/README.md). Existing
 `groups.properties` data is imported once and retained only as a legacy backup.
 
 Owners control the clan and appoint managers. Managers can invite or remove

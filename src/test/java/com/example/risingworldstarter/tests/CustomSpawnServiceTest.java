@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-final class CustomSpawnServiceTest extends SqliteTestSupport {
+final class CustomSpawnServiceTest extends MongoTestSupport {
     @Test void savesUpdatesFindsAndDeletesCaseInsensitively() {
         var spawns = new CustomSpawnService(database);
         spawns.save("character", "Home", 1, 2, 3, 0, 0, 0, 1);

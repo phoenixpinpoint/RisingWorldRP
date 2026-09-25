@@ -6,7 +6,7 @@ import java.nio.file.Files;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-final class EconomyServiceTest extends SqliteTestSupport {
+final class EconomyServiceTest extends MongoTestSupport {
     @Test void depositsAndWithdrawalsPersist() {
         var economy = new DatabaseEconomyService(database);
         assertEquals(1_000L, economy.createAccount("character", 1_000L));

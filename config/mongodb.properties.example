@@ -1,0 +1,6 @@
+# Copy to Plugins/CivicCore/mongodb.properties (NOT the world save).
+# Environment variables override these values. Never commit credentials.
+# CIVICCORE_MONGODB_URI=mongodb+srv://USER:PASSWORD@CLUSTER.mongodb.net/?retryWrites=true&w=majority
+uri=
+# CIVICCORE_MONGODB_DATABASE=civiccore
+database=civiccore

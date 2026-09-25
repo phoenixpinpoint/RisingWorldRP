@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-final class UserStoreServiceTest extends SqliteTestSupport {
+final class UserStoreServiceTest extends MongoTestSupport {
     @Test void purchaseTransfersFundsAndConsumesListing() {
         var economy = new DatabaseEconomyService(database);
         var store = new UserStoreService(database);

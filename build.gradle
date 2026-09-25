@@ -70,11 +70,12 @@ sourceSets {
         java.srcDirs = ['src']
         java.exclude 'test/**'
         resources.srcDirs = ['.', 'src']
-        resources.include 'resources/**', 'com/example/risingworldstarter/database/schema.sql'
+        resources.include 'resources/**'
     }
     coreTest {
         java.srcDirs = ['src', 'src/test/java']
         java.include 'com/example/risingworldstarter/database/**'
+        java.include 'com/example/risingworldstarter/claims/**'
         java.include 'com/example/risingworldstarter/economy/**'
         java.include 'com/example/risingworldstarter/groups/**'
         java.include 'com/example/risingworldstarter/journal/**'
@@ -95,7 +96,9 @@ dependencies {
     if (sdkJar != null) {
         compileOnly files(sdkJar)
     }
-    implementation 'org.xerial:sqlite-jdbc:3.53.1.0'
+    implementation 'org.mongodb:mongodb-driver-sync:5.7.0'
+    // Only used to import existing worlds, never for live persistence.
+    runtimeOnly 'org.xerial:sqlite-jdbc:3.53.1.0'
     implementation 'org.slf4j:slf4j-api:2.0.17'
     runtimeOnly 'org.slf4j:slf4j-nop:2.0.17'
     coreTestImplementation 'org.junit.jupiter:junit-jupiter:5.14.1'
@@ -124,11 +127,14 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 tasks.named('test', Test) {
-    description = 'Runs non-UI unit and SQLite repository tests.'
+    description = 'Runs non-UI service, migration, and MongoDB tests.'
     setDependsOn([tasks.named('coreTestClasses')])
     testClassesDirs = sourceSets.coreTest.output.classesDirs
     classpath = sourceSets.coreTest.runtimeClasspath
     useJUnitPlatform()
+    if (providers.gradleProperty('mongoTestExecutable').present) {
+        systemProperty 'mongoTestExecutable', providers.gradleProperty('mongoTestExecutable').get()
+    }
     testLogging {
         events 'passed', 'skipped', 'failed'
         exceptionFormat = 'full'
@@ -190,6 +196,7 @@ tasks.named('jar') {
         )
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    exclude 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA'
     from {
         configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
     }
@@ -207,6 +214,7 @@ tasks.register('installConfig', Copy) {
     description = 'Explicitly copies project configuration templates into the plugin directory.'
     from layout.projectDirectory.dir('config')
     include '*.properties', '*.json'
+    exclude 'mongodb.properties'
     into { requireRisingWorldDirectory(risingWorldDirectory) }
 }
 

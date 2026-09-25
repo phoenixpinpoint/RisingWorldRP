@@ -196,7 +196,7 @@ for commands, storage, protection behavior, and the public service API.
 ## Subsystem documentation
 
 - [Database](src/com/example/risingworldstarter/database/README.md) explains the
-  storage abstraction, SQLite backend, schema location, and configuration boundary.
+  MongoDB Atlas setup, automatic SQLite import, world identity, and backups.
 - [Economy](src/com/example/risingworldstarter/economy/README.md) covers balances,
   configuration, payroll, persistence, and the public economy API.
 - [Land claims](src/com/example/risingworldstarter/claims/README.md) covers chunk
@@ -209,9 +209,12 @@ for commands, storage, protection behavior, and the public service API.
 ## World and server isolation
 
 Characters, inventories, balances, claims, and administrator assignments are
-isolated by Rising World's own world directory. Starting another world or
-server uses its separate `Worlds/<world>/CivicCore/`
-directory, preventing characters and inventories from crossing between worlds. On the first launch after upgrading, legacy
+stored in MongoDB Atlas, scoped by the persistent ID in each world's
+`Worlds/<world>/CivicCore/mongodb-world-id.txt`. Configure
+`CIVICCORE_MONGODB_URI` before starting an enabled world; see the
+[database setup and migration guide](src/com/example/risingworldstarter/database/README.md).
+The existing `civiccore.db` is imported once into an empty Atlas world and retained
+as a backup. Back up Atlas for changes made after migration. On the first launch after upgrading, legacy
 global data and previous `RisingWorldStarter` world data are copied
 into the currently loaded world once; the original files
 remain in place as a recovery backup.
